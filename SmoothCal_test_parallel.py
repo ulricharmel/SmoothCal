@@ -22,39 +22,6 @@ import algorithms as algos
 from GP.tools import draw_samples
 #from pyrap.tables import table as pt
 
-def interpolate(*args, **kwargs):
-    """
-    This here is to get the stack trace when an exception is thrown
-    """
-    try:
-        return interpolate_impl(*args, **kwargs)
-    except Exception as e:
-        traceback_str = traceback.format_exc(e)
-        raise StandardError("Error occurred. Original traceback "
-                            "is\n%s\n" % traceback_str)
-
-
-def interpolate_impl(theta, tp, gbar, gobs, K, Ky, D, k):
-    """
-    This is for the gain interpolation
-    """
-    gmean, gcov = Ky.interp(tp, theta, gobs, gbar)
-    return gmean, gcov, k
-
-def get_interp(theta, tp, gbar, gobs, K, Ky, D, Na):
-    futures = []
-    max_jobs = np.min(np.array([psutil.cpu_count(logical=False), Na]))
-    gp = np.zeros([Na, tp.size], dtype=np.complex128)
-    with cf.ProcessPoolExecutor(max_workers=max_jobs) as executor:
-        for k in xrange(Na):
-            future = executor.submit(interpolate, theta[k], tp, gbar[k], gobs[k], K[k], Ky[k], D[k], k)
-            futures.append(future)
-        for f in cf.as_completed(futures):
-            gmean, gcov, k = f.result()
-            gp[k] = gmean
-    return gp
-
-
 def train(*args, **kwargs):
     """
     This here is to get the stack trace when an exception is thrown
@@ -175,19 +142,28 @@ def get_hypers(theta, V, A, W, K, Ky, D, g0):
 
 
 if __name__=="__main__":
+    Nfull = 550
+    tfull = np.linspace(-5.5, 5.5, Nfull)
     # set time domain
-    Nt = 250
-    #t = np.linspace(-5.5, 5.5, Nt)
-    t = np.sort(-5.5 + 11*np.random.random(Nt))
-    Ntp = 500
-    tp = np.linspace(-5.5, 5.5, Ntp)
+    interval = 50
+    Nt = 300
+    t = tfull[0:interval]
+    tp = tfull[interval:2*interval]
+    for i in xrange(2,Nfull//interval):
+        if i%2==0:
+            t = np.append(t, tfull[i*interval:(i+1)*interval])
+        else:
+            tp = np.append(tp, tfull[i * interval:(i + 1) * interval])
+    # t = np.sort(-5.5 + 11*np.random.random(Nt))
+    # Ntp = 500
+    # tp = np.linspace(-5.5, 5.5, Ntp)
 
     # number of antennae
     Na = 3
 
     # set mean functions for amplitude and phase
-    meanfr = np.ones(Nt, dtype=np.float64)
-    meanfi = np.zeros(Nt, dtype=np.float64)
+    meanfr = np.ones(Nfull, dtype=np.float64)
+    meanfi = np.zeros(Nfull, dtype=np.float64)
 
     # set covariance params
     lGP = 0.5
@@ -199,7 +175,11 @@ if __name__=="__main__":
     # sample gains
     def cov_func(x, theta):
         return theta[0]**2*np.exp(-x**2/(2*theta[1]**2))
-    g = draw_samples.draw_samples(meanfr, t, theta0, cov_func, Na) + 1.0j*draw_samples.draw_samples(meanfi, t, theta0, cov_func, Na)
+    gfull = draw_samples.draw_samples(meanfr, tfull, theta0, cov_func, Na) + 1.0j*draw_samples.draw_samples(meanfi, tfull, theta0, cov_func, Na)
+
+    g = np.zeros([Na, Nt], dtype=np.complex128)
+    for i in xrange(0,Nfull//interval - Nfull//(2*interval)):
+        g[:, i*interval:(i+1)*interval] = gfull[:, 2*i*interval:(2*i+1)*interval]
 
     # make sky model
     Npix = 33
@@ -321,26 +301,42 @@ if __name__=="__main__":
         print diff
 
     # test interpolation
-    gp = get_interp(theta, tp, gbar, gobs, Klist, Kylist, Dlist, Na)
+    gp = algos.get_interp(theta, tp, gbar, gobs, Klist, Kylist, Dlist, Na)
 
     # plot result
-    plt.figure('phase GP')
-    gdiff = np.angle(gbar[0,:]) - np.angle(g[0,:])
-    plt.plot(t, np.angle(g[1,:]), 'b', label='True')
-    plt.plot(t, np.angle(gbar[1,:]) - gdiff, 'g', label='Learnt')
-    plt.plot(t, np.angle(gobs[1, :]) - gdiff, 'g', label='Observed')
-    #plt.plot(tp, np.angle(gp[1, :]) - gdiff, 'g', label='Observed')
-    plt.legend()
-    plt.savefig('/home/landman/Projects/SmoothCal/figures/phase.png', dpi=250)
+    # plt.figure('phase GP')
+    # gdiff = np.angle(gbar[0,:]) - np.angle(g[0,:])
+    # plt.plot(t, np.angle(g[1,:]), 'b', label='True')
+    # plt.plot(t, np.angle(gbar[1,:]) - gdiff, 'g', label='Learnt')
+    # plt.plot(t, np.angle(gobs[1, :]) - gdiff, 'g', label='Observed')
+    # #plt.plot(tp, np.angle(gp[1, :]) - gdiff, 'g', label='Observed')
+    # plt.legend()
+    # plt.savefig('/home/landman/Projects/SmoothCal/figures/phase.png', dpi=250)
+    #
+    # plt.figure('amp GP')
+    # plt.plot(t, np.abs(g[1,:]), 'b', label='True')
+    # plt.plot(t, np.abs(gbar[1,:]), 'g', label='Learnt')
+    # plt.plot(t, np.abs(gobs[1, :]), 'r', label='Observed')
+    # plt.plot(tp, np.abs(gp[1, :]), 'k', label='Interpolated')
+    # plt.legend()
+    # plt.savefig('/home/landman/Projects/SmoothCal/figures/amp.png', dpi = 250)
 
-    plt.figure('amp GP')
-    plt.plot(t, np.abs(g[1,:]), 'b', label='True')
-    plt.plot(t, np.abs(gbar[1,:]), 'g', label='Learnt')
-    plt.plot(t, np.abs(gobs[1, :]), 'r', label='Observed')
-    plt.plot(tp, np.abs(gp[1, :]), 'k', label='Interpolated')
-    plt.legend()
-    plt.savefig('/home/landman/Projects/SmoothCal/figures/amp.png', dpi = 250)
 
+    plt.figure('g.real')
+    plt.plot(tfull, (gfull[0,:]*gfull[1,:].conj()).real, 'k', label='True')
+    plt.plot(t, (gbar[0,:]*gbar[1,:].conj()).real, 'b_', alpha=0.5, label='Learnt')
+    #plt.plot(t, (gobs[0,:]*gobs[1, :].conj()).real, 'ro', label='Observed')
+    plt.plot(tp, (gp[0,:]*gp[1, :].conj()).real, 'rx', alpha=0.5, label='Interpolated')
+    plt.legend()
+    plt.savefig('/home/landman/Projects/SmoothCal/figures/real.png', dpi = 250)
+
+    plt.figure('g.imag')
+    plt.plot(tfull, (gfull[0,:]*gfull[1,:].conj()).imag, 'k', label='True')
+    plt.plot(t, (gbar[0,:]*gbar[1,:].conj()).imag, 'b_', alpha=0.5, label='Learnt')
+    #plt.plot(t, (gobs[0,:]*gobs[1, :].conj()).imag, 'r', label='Observed')
+    plt.plot(tp, (gp[0,:]*gp[1, :].conj()).imag, 'rx', alpha=0.5, label='Interpolated')
+    plt.legend()
+    plt.savefig('/home/landman/Projects/SmoothCal/figures/imag.png', dpi = 250)
 
     plt.show()
 

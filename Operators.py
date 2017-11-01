@@ -355,7 +355,7 @@ class Ky_operator(object):
             Kp = self.K.kernel.cov_func(theta, ttp, noise=False)
             Kpp = self.K.kernel.cov_func(theta, ttpp, noise=False)
             # get the mean function
-            gmean = np.ones(tp.size, dtype=np.complex128) + np.dot(Kp.T, self._idot(gobs - gbar))
+            gmean = np.dot(Kp.T, self._idot(gobs))
             gcov = Kpp - Kp.T.dot(self._idot(Kp))
             return gmean, gcov
         else:

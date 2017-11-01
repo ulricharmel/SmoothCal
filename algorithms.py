@@ -19,6 +19,39 @@ from scipy.linalg import eigh as seigh
 from GP.kernels import exponential_squared as expsq
 import matplotlib.pyplot as plt
 
+def interpolate(*args, **kwargs):
+    """
+    This here is to get the stack trace when an exception is thrown
+    """
+    try:
+        return interpolate_impl(*args, **kwargs)
+    except Exception as e:
+        traceback_str = traceback.format_exc(e)
+        raise StandardError("Error occurred. Original traceback "
+                            "is\n%s\n" % traceback_str)
+
+
+def interpolate_impl(theta, tp, gbar, gobs, K, Ky, D, k):
+    """
+    This is for the gain interpolation
+    """
+    gmean, gcov = Ky.interp(tp, theta, gobs, gbar)
+    return gmean, gcov, k
+
+def get_interp(theta, tp, gbar, gobs, K, Ky, D, Na):
+    futures = []
+    max_jobs = np.min(np.array([psutil.cpu_count(logical=False), Na]))
+    gp = np.zeros([Na, tp.size], dtype=np.complex128)
+    with cf.ProcessPoolExecutor(max_workers=max_jobs) as executor:
+        for k in xrange(Na):
+            future = executor.submit(interpolate, theta[k], tp, gbar[k], gobs[k], K[k], Ky[k], D[k], k)
+            futures.append(future)
+        for f in cf.as_completed(futures):
+            gmean, gcov, k = f.result()
+            gp[k] = gmean
+    return gp
+
+
 def update(*args, **kwargs):
     """
     This here is to get the stack trace when an exception is thrown
