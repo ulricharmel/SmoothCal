@@ -345,7 +345,7 @@ class Ky_operator(object):
         else:
             raise NotImplementedError("Mode argument not supported")
 
-    def interp(self, tp, theta, gobs, gbar):
+    def interp(self, tp, theta, gobs, gmean):
         if self.K.solve_mode == "full":
             # get matrix of differences
             from GP.tools import abs_diff
@@ -355,9 +355,9 @@ class Ky_operator(object):
             Kp = self.K.kernel.cov_func(theta, ttp, noise=False)
             Kpp = self.K.kernel.cov_func(theta, ttpp, noise=False)
             # get the mean function
-            gmean = np.dot(Kp.T, self._idot(gobs))
+            gbar = np.ones(tp.size, dtype=np.complex128)*gmean + np.dot(Kp.T, self._idot(gobs-np.ones(self.K.N, dtype=np.complex128)*gmean))
             gcov = Kpp - Kp.T.dot(self._idot(Kp))
-            return gmean, gcov
+            return gbar, gcov
         else:
             raise NotImplementedError("Still working on faster solve_mode")
 
