@@ -42,7 +42,7 @@ if __name__=="__main__":
             tp = np.append(tp, tfull[i * interval:(i + 1) * interval])
 
     # number of antennae
-    Na = 3
+    Na = 9
 
     # set mean functions for amplitude and phase
     meanfr = np.ones(Nfull, dtype=np.float64)
@@ -50,12 +50,15 @@ if __name__=="__main__":
 
     # set covariance params
     lGP = 0.5
-    sigmaf = 0.5
-    sigman = 0.5
+    sigmaf = 0.15
+    sigman = 0.25
     theta0 = np.array([sigmaf, lGP, sigman])
     Nhypers = theta0.size
 
-    # sample gains
+    # # sample gains
+    # def cov_func(x, theta):
+    #         return theta[0] ** 2 * np.exp(-np.sqrt(5) * np.abs(x) / theta[1]) * (1 + np.sqrt(5) * np.abs(x) / theta[1] + 5 * np.abs(x) ** 2 / (3 * theta[1] ** 2))
+
     def cov_func(x, theta):
         return theta[0]**2*np.exp(-x**2/(2*theta[1]**2))
     gfull = draw_samples.draw_samples(meanfr, tfull, theta0, cov_func, Na) + 1.0j*draw_samples.draw_samples(meanfi, tfull, theta0, cov_func, Na)
@@ -101,6 +104,7 @@ if __name__=="__main__":
     vpq = np.zeros([N, Nt])
     phi = np.linspace(0, np.pi, Nt) # to simulate earth rotation
     for i, pq in enumerate(iter(pqlist)):
+        print i, pq
         upq[i, 0] = u[int(pq[0])-1] - u[int(pq[1])-1]
         vpq[i, 0] = v[int(pq[0])-1] - v[int(pq[1])-1]
         for j in xrange(1, Nt):
@@ -134,20 +138,22 @@ if __name__=="__main__":
     Wpq = np.ones_like(Vpq, dtype=np.float64)
 
     # run Smoothcal cycle
-    gbar, gobs, Klist, Kylist, Dlist, theta = algos.SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=1e-4, maxiter=25)
+    theta0[0] = np.sqrt(2)*sigmaf
+    #theta0[-1] = np.sqrt(2) * sigman
+    gbar, gobs, Klist, Kylist, Dlist, theta = algos.SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25)
 
     # Do interpolation
     meanval = np.mean(gbar, axis=1)
-    gp = algos.get_interp(theta, tfull, meanval, gobs, Klist, Kylist, Dlist, Na)
+    gp, gcov = algos.get_interp(theta, tfull, meanval, gobs, Klist, Kylist, Dlist, Na)
 
     # do StefCal cycle
-    gbar2, Sigmay = algos.StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=1e-4, maxiter=25)
+    gbar2, Sigmay = algos.StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25)
 
     # interpolate using StefCal data
     for i in xrange(Na):
         Kylist[i].update(Klist[i], Sigmay[i])
     meanval2 = np.mean(gbar2, axis=1)
-    gp2 = algos.get_interp(theta, tfull, meanval, gbar2, Klist, Kylist, Dlist, Na)
+    gp2, gcov2 = algos.get_interp(theta, tfull, meanval, gbar2, Klist, Kylist, Dlist, Na)
 
     # do linear interpolation on StefCal result
     gp3 = np.zeros_like(gp, dtype=np.complex128)
@@ -161,6 +167,8 @@ if __name__=="__main__":
     plt.plot(tfull[I], (gp[0,I]*gp[1,I].conj()).real, 'b+', alpha=0.5, label='SmoothCal')
     plt.plot(t, (gbar2[0,:]*gbar2[1, :].conj()).real, 'g--', alpha=0.5, label='StefCal')
     plt.plot(tfull[I2], (gp[0,I2]*gp[1, I2].conj()).real, 'r+', alpha=0.5, label='Interpolated')
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$Real(g_p g_q^\dagger)$', fontsize=18)
     #plt.plot(t, (gobs[0, :] * gobs[1, :].conj()).real, 'g--', alpha=0.5, label='Observed')
     plt.legend()
     plt.savefig('/home/landman/Projects/SmoothCal/figures/real.png', dpi = 250)
@@ -170,6 +178,8 @@ if __name__=="__main__":
     plt.plot(tfull[I], (gp[0,I]*gp[1,I].conj()).imag, 'b+', alpha=0.5, label='SmoothCal')
     plt.plot(t, (gbar2[0, :] * gbar2[1, :].conj()).imag, 'g--', alpha=0.5, label='StefCal')
     plt.plot(tfull[I2], (gp[0,I2]*gp[1, I2].conj()).imag, 'r+', alpha=0.5, label='Interpolated')
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$Imag(g_p g_q^\dagger)$', fontsize=18)
     #plt.plot(t, (gobs[0, :] * gobs[1, :].conj()).imag, 'g--', alpha=0.5, label='Observed')
     plt.legend()
     plt.savefig('/home/landman/Projects/SmoothCal/figures/imag.png', dpi = 250)
@@ -182,6 +192,9 @@ if __name__=="__main__":
     plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp2[0, :] * gp2[1, :].conj()), 'g--', label='Smoothed StefCal')
     plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp3[0, :] * gp3[1, :].conj()), 'b--', label='StefCal')
     plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp[0, :] * gp[1, :].conj()), 'k--', label='SmoothCal interp')
+    plt.fill_between(tfull, np.sqrt(np.diag(gcov2[0]).real + np.diag(gcov2[1]).real), np.zeros(Nfull), facecolor='b', alpha=0.5)
+    plt.xlabel(r'$t$', fontsize=18)
+    plt.ylabel(r'$|\epsilon|$', fontsize=18)
     plt.legend()
     plt.savefig('/home/landman/Projects/SmoothCal/figures/error.png', dpi = 250)
 

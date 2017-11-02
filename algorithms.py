@@ -43,6 +43,7 @@ def get_interp(theta, tp, gmean, gobs, K, Ky, D, Na):
     futures = []
     max_jobs = np.min(np.array([psutil.cpu_count(logical=False), Na]))
     gp = np.zeros([Na, tp.size], dtype=np.complex128)
+    gpcov = np.zeros([Na, tp.size, tp.size], dtype=np.complex128)
     with cf.ProcessPoolExecutor(max_workers=max_jobs) as executor:
         for k in xrange(Na):
             future = executor.submit(interpolate, theta[k], tp, gmean[k], gobs[k], K[k], Ky[k], D[k], k)
@@ -50,7 +51,8 @@ def get_interp(theta, tp, gmean, gobs, K, Ky, D, Na):
         for f in cf.as_completed(futures):
             gmean, gcov, k = f.result()
             gp[k] = gmean
-    return gp
+            gpcov[k] = gcov
+    return gp, gpcov
 
 
 def update(*args, **kwargs):

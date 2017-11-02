@@ -55,6 +55,9 @@ class K_operator(object):
 
         from GP.kernels import exponential_squared
         self.kernel = exponential_squared.sqexp()
+        #from GP.kernels import mattern
+        #self.kernel = mattern.mattern(p=2, D=1)
+
         # set covariance function and evaluate
         self.theta = theta0
         # set initial jitter factor (for numerical stability of inverse)
@@ -70,6 +73,7 @@ class K_operator(object):
 
             # evaluate covaraince matrix
             self.val = self.kernel.cov_func(self.theta, self.tt, noise=False)
+            #self.val2 = self.kernel.cov_func2(self.theta, self.tt, noise=False)
 
             # get cholesky decomp
             self.L = np.linalg.cholesky(self.val + self.jit * np.eye(self.N)) #add jitter for numerical stability
@@ -462,14 +466,11 @@ if __name__=="__main__":
     
     # construct linear operator
     K = K_operator(t, theta, solve_mode="full", M=12, L=5.0, jit=1e-4)
-    # f = open('/home/landman/Projects/SmoothCal/pickles/K.dat', 'w+')
-    # pickle.dump(K, f)
-    # f.close()
-    #tmp = K._dot(t)
-    #
-    # f = open('/home/landman/Projects/SmoothCal/pickles/K.dat', 'r')
-    # K2 = pickle.load(f)
-    # f.close()
+
+    tmp = K._dot(t)
+
+    #from scipy.special import
+
     #
     # ti = time.time()
     # t2 = K.valinv2.dot(tmp)
@@ -480,10 +481,11 @@ if __name__=="__main__":
     # tmp = np.abs(K.valinv - K.valinv2)
     # print np.argwhere(tmp==np.max(tmp))
     #
-    # plt.figure()
-    # plt.plot(t, K.val[:,0])
-    # plt.plot(t, K.val2[:,0])
-    # plt.show()
+    plt.figure()
+    #plt.plot(t, K.val[:,100] - K.val2[:,100])
+    plt.plot(t, K.val[:, -1])
+    plt.plot(t, K.val2[:, -1])
+    plt.show()
     #
     # plt.figure('2')
     # plt.plot(t, K.valinv[:,0])
@@ -496,9 +498,9 @@ if __name__=="__main__":
     # print np.diag(Knew)
 
     #sigman = 0.00001
-    Sigmay = sigman**2*np.abs(np.random.randn(N))
+    #Sigmay = sigman**2*np.abs(np.random.randn(N))
 
-    Ky = Ky_operator(K, Sigmay, solve_mode="full")
+    #Ky = Ky_operator(K, Sigmay, solve_mode="full")
     #
     # # f = open('/home/landman/Projects/SmoothCal/pickles/Ky.dat', 'w+')
     # # pickle.dump(Ky, f)
@@ -513,11 +515,11 @@ if __name__=="__main__":
     #t2 = Ky.valinv2.dot(tmp)
 
     #print np.max(np.abs(t-t2))
-    KyinvK = Ky._idot(K.val)
-    Kyinv = Ky.Linv.conj().T.dot(Ky.Linv)
-    KyinvK = np.dot(Kyinv, K.val)
-    KKyinv = np.dot(K.val, Kyinv)
-    print np.max(np.abs(KKyinv - KyinvK))
+    # KyinvK = Ky._idot(K.val)
+    # Kyinv = Ky.Linv.conj().T.dot(Ky.Linv)
+    # KyinvK = np.dot(Kyinv, K.val)
+    # KKyinv = np.dot(K.val, Kyinv)
+    # print np.max(np.abs(KKyinv - KyinvK))
 
     # plt.figure()
     # plt.plot(t, Ky.val[:,0])
