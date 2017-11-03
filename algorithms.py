@@ -305,9 +305,9 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25):
     Nhypers = theta0.size
 
     # set operators and data structures for doing per antennae solve
-    A = np.zeros([Na, Nt*Na, Nt], dtype=np.complex128) # to hold per-antenna response
-    V = np.zeros([Na, Nt*Na], dtype=np.complex128) # to hold per-antenna data
-    W = np.ones([Na, Nt*Na], dtype=np.float64) # to hold weights
+    A = np.ma.masked_all((Na, Nt*Na, Nt), dtype=np.complex128) # to hold per-antenna response
+    V = np.ma.masked_all((Na, Na, Nt), dtype=np.complex128) # to hold per-antenna data
+    W = np.ma.masked_all((Na, Na, Nt), dtype=np.float64) # to hold weights
     Sigma = np.zeros([Na, Na*Nt], dtype=np.complex128) # to hold per-antenna weights
     Sigmay = np.zeros([Na, Nt], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
     theta = np.zeros([Na, Nhypers]) # hyper-parameters excluding sigman

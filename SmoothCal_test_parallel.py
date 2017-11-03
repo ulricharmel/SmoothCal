@@ -20,153 +20,111 @@ import matplotlib.pyplot as plt
 import Operators as ops
 import algorithms as algos
 from GP.tools import draw_samples
-#from pyrap.tables import table as pt
+from pyrap.tables import table as pt
 
 
 if __name__=="__main__":
-    Nfull = 550
-    tfull = np.linspace(-5.5, 5.5, Nfull)
-    # set time domain
-    interval = 50
-    Nt = 300
-    I = np.arange(interval)  # data index
-    I2 = np.arange(interval, 2*interval)
-    t = tfull[0:interval]
-    tp = tfull[interval:2*interval]
-    for i in xrange(2,Nfull//interval):
-        if i%2==0:
-            I = np.append(I, np.arange(i*interval,(i+1)*interval))
-            t = np.append(t, tfull[i*interval:(i+1)*interval])
-        else:
-            I2 = np.append(I2, np.arange(i * interval, (i + 1) * interval))
-            tp = np.append(tp, tfull[i * interval:(i + 1) * interval])
+    # open MS
+    ms = pt("/home/landman/Projects/Data/MS_dir/PKS1934/channel0.ms", readonly=False)
 
+    # get time stamps
+    times = ms.getcol("TIME")
+    t = np.unique(times)
+    Nt = t.size
+
+    # scale and shift times
+    tnorm = (t - np.min(t))/np.max(t) - 0.5 # now tnorm lies between -0.5 and 0.5
+
+    # get antennae list
+    anta = ms.getcol("ANTENNA1")
+    antb = ms.getcol("ANTENNA2")
     # number of antennae
-    Na = 9
+    Na = antb[-1]+1
 
-    # set mean functions for amplitude and phase
-    meanfr = np.ones(Nfull, dtype=np.float64)
-    meanfi = np.zeros(Nfull, dtype=np.float64)
+    # get single channel/correlation data
+    ch = 0
+    corr = 0
+    mod_vis = ms.getcol("MODEL_DATA")[:, ch, corr]
+    vis = ms.getcol("DATA")[:, ch, corr]
 
-    # set covariance params
+    # get flags
+    flags = ms.getcol("FLAG")[:, ch, corr]
+
+    # get weights
+    weights = ms.getcol("WEIGHT")[:,0]
+
+    # amplitude of calibrator taken from PKS document
+    Flux = 15.0578061029
+    mod_vis *= Flux
+
+    # set initial guess for covariance params
     lGP = 0.5
     sigmaf = 0.15
     sigman = 0.25
     theta0 = np.array([sigmaf, lGP, sigman])
     Nhypers = theta0.size
 
-    # # sample gains
-    # def cov_func(x, theta):
-    #         return theta[0] ** 2 * np.exp(-np.sqrt(5) * np.abs(x) / theta[1]) * (1 + np.sqrt(5) * np.abs(x) / theta[1] + 5 * np.abs(x) ** 2 / (3 * theta[1] ** 2))
+    # build cubes
+    Xpq = np.zeros([Na, Na, Nt], dtype=np.complex128) # model vis cube
+    Vpq = np.zeros([Na, Na, Nt], dtype=np.complex128) # vis cube
+    Wpq = np.ones_like(Vpq, dtype=np.float64) # weights cube
+    for i in xrange(Nt):
+        # get indices corresponding to time i
+        I = np.argwhere(times == t[i]).squeeze()
+        # antennae labels for time i
+        ant1 = anta[I].squeeze()
+        ant2 = antb[I].squeeze()
+        # get visibilities
+        mvis = mod_vis[I]
+        dvis = vis[I]
+        W = weights[I]
+        F = flags[I]
+        for j in xrange(I.size):
+            f = F[j]
+            if not f:
+                p = ant1[j]
+                q = ant2[j]
+                Xpq[p, q, i] = mvis[j]
+                Vpq[p, q, i] = dvis[j]
+                Wpq[p, q, i] = W[j]
+                Wpq[q, p, i] = W[j]
 
-    def cov_func(x, theta):
-        return theta[0]**2*np.exp(-x**2/(2*theta[1]**2))
-    gfull = draw_samples.draw_samples(meanfr, tfull, theta0, cov_func, Na) + 1.0j*draw_samples.draw_samples(meanfi, tfull, theta0, cov_func, Na)
-
-    g = np.zeros([Na, Nt], dtype=np.complex128)
-    for i in xrange(0,Nfull//interval - Nfull//(2*interval)):
-        g[:, i*interval:(i+1)*interval] = gfull[:, 2*i*interval:(2*i+1)*interval]
-
-    # make sky model
-    Npix = 33
-    l = np.linspace(-1.0, 1.0, Npix)
-    m = np.linspace(-1.0, 1.0, Npix)
-    ll, mm = np.meshgrid(l, m)
-    lm = (np.vstack((ll.flatten(), mm.flatten())))
-    IM = np.zeros([Npix, Npix])
-    IM[Npix//2, Npix//2] = 10.0
-    IM[Npix//4, Npix//4] = 1.0
-    IM[3*Npix//4, 3*Npix//4] = 1.0
-    IM[Npix//4, 3*Npix//4] = 1.0
-    IM[3*Npix//4, Npix//4] = 1.0
-    IMflat = IM.flatten()
-
-    # this is to create the pq iterator
-    tmp = '1'
-    for i in xrange(2, Na+1):
-        tmp += str(i)
-
-    # iterator over antenna pairs
-    autocor = True
-    if autocor:
-        pqlist = list(it.combinations_with_replacement(tmp,2))
-        N = Na*(Na+1)//2 #number of antenna pairs including autocor
-    else:
-        pqlist = list(it.combinations(tmp,2))
-        N = Na*(Na-1)//2 #number of antenna pairs excluding autocor
-
-    # choose random antennae locations
-    u = np.random.random(Na)
-    v = np.random.random(Na)
-
-    # create baselines with time axis
-    upq = np.zeros([N, Nt])
-    vpq = np.zeros([N, Nt])
-    phi = np.linspace(0, np.pi, Nt) # to simulate earth rotation
-    for i, pq in enumerate(iter(pqlist)):
-        print i, pq
-        upq[i, 0] = u[int(pq[0])-1] - u[int(pq[1])-1]
-        vpq[i, 0] = v[int(pq[0])-1] - v[int(pq[1])-1]
-        for j in xrange(1, Nt):
-            rottheta = np.array([[np.cos(phi[j]), -np.sin(phi[j])], [np.sin(phi[j]), np.cos(phi[j])]])
-            upq[i, j], vpq[i, j] = np.dot(rottheta, np.array([upq[i, 0], vpq[i, 0]]))
-
-#    # inspect uv-coverage
-#    plt.figure('uv')
-#    plt.xlim(-1.1,1.1)
-#    plt.ylim(-1.1,1.1)
-#    for j in xrange(Nt):
-#        plt.plot(upq[:,j], vpq[:,j], 'xr')
-
-    # do DFT to get model visibilities
-    Xpq = np.zeros([Na, Na, Nt], dtype=np.complex)
-    Vpq = np.zeros([Na, Na, Nt], dtype=np.complex)
-    for i, pq in enumerate(iter(pqlist)):
-        p = int(pq[0])-1
-        q = int(pq[1])-1
-        gp = g[p,:]
-        gqH = g[q,:].conj()
-        for j in xrange(Nt):
-            uv = np.array([upq[i,j], vpq[i,j]])
-            K = np.exp(-2.0j*np.pi*np.dot(uv,lm))
-            Xpq[p,q,j] = np.dot(K, IMflat)
-            Xpq[q,p,j] = Xpq[p,q,j].conj()
-            # corrupt model vis
-            Vpq[p,q,j] = gp[j]*Xpq[p,q,j]*gqH[j] + sigman*np.random.randn() + sigman*1.0j*np.random.randn()
-            Vpq[q,p,j] = Vpq[p,q,j].conj()
-
-    Wpq = np.ones_like(Vpq, dtype=np.float64)
+    # create masked arrays
+    Xpq = ma.masked_array(Xpq, 0)
+    Vpq = ma.masked_array(Vpq, 0)
+    Wpq = ma.masked_array(Wpq, 0)
 
     # run Smoothcal cycle
     theta0[0] = np.sqrt(2)*sigmaf
     #theta0[-1] = np.sqrt(2) * sigman
-    gbar, gobs, Klist, Kylist, Dlist, theta = algos.SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25)
+    gbar, gobs, Klist, Kylist, Dlist, theta = algos.SmoothCal(Na, Nt, Xpq, Vpq, Wpq, tnorm, theta0, tol=5e-3, maxiter=25)
 
-    # Do interpolation
-    meanval = np.mean(gbar, axis=1)
-    gp, gcov = algos.get_interp(theta, tfull, meanval, gobs, Klist, Kylist, Dlist, Na)
-
-    # do StefCal cycle
-    gbar2, Sigmay = algos.StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25)
-
-    # interpolate using StefCal data
-    for i in xrange(Na):
-        Kylist[i].update(Klist[i], Sigmay[i])
-    meanval2 = np.mean(gbar2, axis=1)
-    gp2, gcov2 = algos.get_interp(theta, tfull, meanval, gbar2, Klist, Kylist, Dlist, Na)
-
-    # do linear interpolation on StefCal result
-    gp3 = np.zeros_like(gp, dtype=np.complex128)
-    for i in xrange(Na):
-        gp3[i,:] = np.interp(tfull, t, gbar2[i,:].real) + 1.0j*np.interp(tfull, t, gbar2[i,:].imag)
-
-
+    #
+    # # Do interpolation
+    # meanval = np.mean(gbar, axis=1)
+    # gp, gcov = algos.get_interp(theta, tfull, meanval, gobs, Klist, Kylist, Dlist, Na)
+    #
+    # # do StefCal cycle
+    # gbar2, Sigmay = algos.StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25)
+    #
+    # # interpolate using StefCal data
+    # for i in xrange(Na):
+    #     Kylist[i].update(Klist[i], Sigmay[i])
+    # meanval2 = np.mean(gbar2, axis=1)
+    # gp2, gcov2 = algos.get_interp(theta, tfull, meanval, gbar2, Klist, Kylist, Dlist, Na)
+    #
+    # # do linear interpolation on StefCal result
+    # gp3 = np.zeros_like(gp, dtype=np.complex128)
+    # for i in xrange(Na):
+    #     gp3[i,:] = np.interp(tfull, t, gbar2[i,:].real) + 1.0j*np.interp(tfull, t, gbar2[i,:].imag)
+    #
+    #
     # plot gains
     plt.figure('g.real')
-    plt.plot(tfull, (gfull[0,:]*gfull[1,:].conj()).real, 'k', label='True')
-    plt.plot(tfull[I], (gp[0,I]*gp[1,I].conj()).real, 'b+', alpha=0.5, label='SmoothCal')
-    plt.plot(t, (gbar2[0,:]*gbar2[1, :].conj()).real, 'g--', alpha=0.5, label='StefCal')
-    plt.plot(tfull[I2], (gp[0,I2]*gp[1, I2].conj()).real, 'r+', alpha=0.5, label='Interpolated')
+    #plt.plot(tfull, (gfull[0,:]*gfull[1,:].conj()).real, 'k', label='True')
+    #plt.plot(tfull[I], (gp[0,I]*gp[1,I].conj()).real, 'b+', alpha=0.5, label='SmoothCal')
+    plt.plot(t, (gbar[0,:]*gbar[1, :].conj()).real, 'g--', alpha=0.5, label='StefCal')
+    #plt.plot(tfull[I2], (gp[0,I2]*gp[1, I2].conj()).real, 'r+', alpha=0.5, label='Interpolated')
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$Real(g_p g_q^\dagger)$', fontsize=18)
     #plt.plot(t, (gobs[0, :] * gobs[1, :].conj()).real, 'g--', alpha=0.5, label='Observed')
@@ -174,34 +132,35 @@ if __name__=="__main__":
     plt.savefig('/home/landman/Projects/SmoothCal/figures/real.png', dpi = 250)
 
     plt.figure('g.imag')
-    plt.plot(tfull, (gfull[0,:]*gfull[1,:].conj()).imag, 'k', label='True')
-    plt.plot(tfull[I], (gp[0,I]*gp[1,I].conj()).imag, 'b+', alpha=0.5, label='SmoothCal')
-    plt.plot(t, (gbar2[0, :] * gbar2[1, :].conj()).imag, 'g--', alpha=0.5, label='StefCal')
-    plt.plot(tfull[I2], (gp[0,I2]*gp[1, I2].conj()).imag, 'r+', alpha=0.5, label='Interpolated')
+    #plt.plot(tfull, (gfull[0,:]*gfull[1,:].conj()).imag, 'k', label='True')
+    #plt.plot(tfull[I], (gp[0,I]*gp[1,I].conj()).imag, 'b+', alpha=0.5, label='SmoothCal')
+    plt.plot(t, (gbar[0, :] * gbar[1, :].conj()).imag, 'g--', alpha=0.5, label='StefCal')
+    #plt.plot(tfull[I2], (gp[0,I2]*gp[1, I2].conj()).imag, 'r+', alpha=0.5, label='Interpolated')
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$Imag(g_p g_q^\dagger)$', fontsize=18)
     #plt.plot(t, (gobs[0, :] * gobs[1, :].conj()).imag, 'g--', alpha=0.5, label='Observed')
     plt.legend()
     plt.savefig('/home/landman/Projects/SmoothCal/figures/imag.png', dpi = 250)
 
-
-
-    # plot errors
-    plt.figure('error')
-    plt.plot(tfull[I], np.abs(gfull[0, I] * gfull[1, I].conj() - gbar[0, :] * gbar[1, :].conj()), 'k.', label='SmoothCal')
-    plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp2[0, :] * gp2[1, :].conj()), 'g--', label='Smoothed StefCal')
-    plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp3[0, :] * gp3[1, :].conj()), 'b--', label='StefCal')
-    plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp[0, :] * gp[1, :].conj()), 'k--', label='SmoothCal interp')
-    plt.fill_between(tfull, np.sqrt(np.diag(gcov2[0]).real + np.diag(gcov2[1]).real), np.zeros(Nfull), facecolor='b', alpha=0.5)
-    plt.xlabel(r'$t$', fontsize=18)
-    plt.ylabel(r'$|\epsilon|$', fontsize=18)
-    plt.legend()
-    plt.savefig('/home/landman/Projects/SmoothCal/figures/error.png', dpi = 250)
-
-    plt.show()
-
-
-
+    #
+    #
+    #
+    # # plot errors
+    # plt.figure('error')
+    # plt.plot(tfull[I], np.abs(gfull[0, I] * gfull[1, I].conj() - gbar[0, :] * gbar[1, :].conj()), 'k.', label='SmoothCal')
+    # plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp2[0, :] * gp2[1, :].conj()), 'g--', label='Smoothed StefCal')
+    # plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp3[0, :] * gp3[1, :].conj()), 'b--', label='StefCal')
+    # plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp[0, :] * gp[1, :].conj()), 'k--', label='SmoothCal interp')
+    # plt.fill_between(tfull, np.sqrt(np.diag(gcov2[0]).real + np.diag(gcov2[1]).real), np.zeros(Nfull), facecolor='b', alpha=0.5)
+    # plt.xlabel(r'$t$', fontsize=18)
+    # plt.ylabel(r'$|\epsilon|$', fontsize=18)
+    # plt.legend()
+    # plt.savefig('/home/landman/Projects/SmoothCal/figures/error.png', dpi = 250)
+    #
+    # plt.show()
+    #
+    #
+    #
     # # solve for hypers
     # # set bounds for hypers
     # bnds = ((1e-5, None), (1e-5, None))
