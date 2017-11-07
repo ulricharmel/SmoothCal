@@ -53,10 +53,10 @@ class K_operator(object):
         # set inputs
         self.t = t
 
-        from GP.kernels import exponential_squared
-        self.kernel = exponential_squared.sqexp()
-        #from GP.kernels import mattern
-        #self.kernel = mattern.mattern(p=2, D=1)
+        #from GP.kernels import exponential_squared
+        #self.kernel = exponential_squared.sqexp()
+        from GP.kernels import mattern
+        self.kernel = mattern.mattern(p=2, D=1)
 
         # set covariance function and evaluate
         self.theta = theta0

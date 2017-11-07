@@ -500,7 +500,7 @@ def plot_gains(gbar, gML, t, tp, gcov):
         #plt.xlim(tmin, tmax)
         plt.xlabel(r'$t$', fontsize=18)
         plt.ylabel(r'$Real(g_p g_q^\dagger)$', fontsize=18)
-        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC.real'+str(i) +'.png', dpi = 250)
+        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC2.real'+str(i) +'.png', dpi = 250)
         #plt.show()
         plt.close()
 
@@ -518,5 +518,5 @@ def plot_gains(gbar, gML, t, tp, gcov):
         plt.xlabel(r'$t$', fontsize=18)
         plt.ylabel(r'$Imag(g_p g_q^\dagger)$', fontsize=18)
         #plt.legend()
-        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC.imag'+str(i) +'.png', dpi = 250)
+        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC2.imag'+str(i) +'.png', dpi = 250)
         plt.close()

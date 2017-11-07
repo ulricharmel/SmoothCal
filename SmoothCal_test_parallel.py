@@ -37,9 +37,9 @@ def train_ML_impl(theta0, gML, Sigmay, t, i):
     def gmeanf(t):
         return np.ones(t.size, dtype=np.complex128)*gmean
 
-    GP = temporal_GP.TemporalGP(t, t, gML, Sigmay, prior_mean=gmeanf)
+    GP = temporal_GP.TemporalGP(t, t, gML, Sigmay, prior_mean=gmeanf, covariance_function='mattern')
 
-    bnds = ((1e-6, None), (1e-8, None), (1e-4, None))
+    bnds = ((1e-6, None), (1e-6, None), (1e-4, None))
 
     thetaf = GP.train(theta0, bounds=bnds)
 
@@ -106,8 +106,8 @@ if __name__=="__main__":
     ms.close()
 
     # set initial guess for covariance params
-    lGP = 0.2
-    sigmaf = 1.5
+    lGP = 0.65
+    sigmaf = 0.7
     sigman = 0.025
     theta0 = np.array([sigmaf, lGP, sigman])
     Nhypers = theta0.size
