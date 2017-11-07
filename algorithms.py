@@ -66,7 +66,7 @@ def update(*args, **kwargs):
         raise StandardError("Error occurred. Original traceback "
                             "is\n%s\n" % traceback_str)
 
-def update_impl(g0, gobs0, A, V, Sigma, K, Ky, D, i, k):
+def update_impl(g0, gobs0, A, V, Sigma, K, Ky, D, i, k, lam=0.5):
     """
     Here we compute the update for a single antenna.
     Input:
@@ -84,12 +84,13 @@ def update_impl(g0, gobs0, A, V, Sigma, K, Ky, D, i, k):
     j = np.dot(A.T.conj(), V/Sigma)
     rhs_vec = K._dot(j) + g0
     rhs_vec = rhs_vec - K._dot(Ky._idot(rhs_vec))
-    gbar = (rhs_vec + g0) / 2.0
+    #gbar = (rhs_vec + g0) / 2.0
+    gbar = (1.0-lam)* g0 + lam*rhs_vec
     #print (Ky.Sigmayinv*j).shape
     gobs = (Ky.Sigmayinv.dot(j) + gobs0)/2.0  # maximum likelihood solution for comparison
     return gbar, gobs, k
 
-def get_update(g0, gobs0, A, V, Sigma, K, Ky, D, i, Na):
+def get_update(g0, gobs0, A, V, Sigma, K, Ky, D, i, Na, lam=0.5):
     """
     Here we compute the update for a single antenna. 
     Input:
@@ -106,7 +107,7 @@ def get_update(g0, gobs0, A, V, Sigma, K, Ky, D, i, Na):
     max_jobs = np.min(np.array([psutil.cpu_count(logical=False), Na]))
     with cf.ProcessPoolExecutor(max_workers=max_jobs) as executor:
         for k in xrange(Na):
-            future = executor.submit(update, g0[k], gobs0[k], A[k], V[k], Sigma[k], K[k], Ky[k], D[k], i, k)
+            future = executor.submit(update, g0[k], gobs0[k], A[k], V[k], Sigma[k], K[k], Ky[k], D[k], i, k, lam)
             futures.append(future)
         for f in cf.as_completed(futures):
             g, gobs, k = f.result()
@@ -320,6 +321,7 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25):
     gobs = np.ones([Na, Nt], dtype=np.complex)  # initial guess for maximum likelihood solution
 
     # start iterations
+    lam=0.9
     diff = 1.0
     i = 0
     while diff > tol and i < maxiter:
@@ -349,8 +351,12 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25):
                 Dlist[p].update(Klist[p], Kylist[p])
 
         # Solve for mean
-        gbar, gobs = get_update(gold.copy(), gobsold.copy(), A, V, Sigma, Klist, Kylist, Dlist, i, Na)
+        diffold = diff
+        gbar, gobs = get_update(gold.copy(), gobsold.copy(), A, V, Sigma, Klist, Kylist, Dlist, i, Na, lam=lam)
         diff = np.max(np.abs(gbar-gold))
+        if diff >= diffold:
+            lam = 0.5*lam
+
 
         i += 1
         print "At iteration %i maximum difference is %f"%(i, diff)

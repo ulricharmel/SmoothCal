@@ -42,7 +42,7 @@ if __name__=="__main__":
             tp = np.append(tp, tfull[i * interval:(i + 1) * interval])
 
     # number of antennae
-    Na = 9
+    Na = 4
 
     # set mean functions for amplitude and phase
     meanfr = np.ones(Nfull, dtype=np.float64)
@@ -160,6 +160,25 @@ if __name__=="__main__":
     for i in xrange(Na):
         gp3[i,:] = np.interp(tfull, t, gbar2[i,:].real) + 1.0j*np.interp(tfull, t, gbar2[i,:].imag)
 
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 9))
+    ax[0].plot(tfull, (gfull[0,:]*gfull[1,:].conj()).real, 'k', label='True')
+    ax[0].plot(tfull[I], (gp[0,I]*gp[1,I].conj()).real, 'b+', alpha=0.5, label='SmoothCal')
+    ax[0].plot(t, (gbar2[0,:]*gbar2[1, :].conj()).real, 'g--', alpha=0.5, label='StefCal')
+    ax[0].plot(tfull[I2], (gp[0,I2]*gp[1, I2].conj()).real, 'r+', alpha=0.5, label='Interpolated')
+    ax[0].set_xlabel(r'$t$', fontsize=18)
+    ax[0].set_ylabel(r'$Real(g_p g_q^\dagger)$', fontsize=18)
+    #ax[0].legend()
+
+    ax[1].plot(tfull, (gfull[0, :] * gfull[1, :].conj()).imag, 'k', label='True')
+    ax[1].plot(tfull[I], (gp[0, I] * gp[1, I].conj()).imag, 'b+', alpha=0.5, label='SmoothCal')
+    ax[1].plot(t, (gbar2[0, :] * gbar2[1, :].conj()).imag, 'g--', alpha=0.5, label='StefCal')
+    ax[1].plot(tfull[I2], (gp[0, I2] * gp[1, I2].conj()).imag, 'r+', alpha=0.5, label='Interpolated')
+    ax[1].set_xlabel(r'$t$', fontsize=18)
+    ax[1].set_ylabel(r'$Imag(g_p g_q^\dagger)$', fontsize=18)
+    # plt.plot(t, (gobs[0, :] * gobs[1, :].conj()).imag, 'g--', alpha=0.5, label='Observed')
+    ax[1].legend(loc=2)
+
+    fig.savefig('/home/landman/Projects/SmoothCal/figures/Sim_combined.png', dpi = 250)
 
     # plot gains
     plt.figure('g.real')
@@ -171,7 +190,7 @@ if __name__=="__main__":
     plt.ylabel(r'$Real(g_p g_q^\dagger)$', fontsize=18)
     #plt.plot(t, (gobs[0, :] * gobs[1, :].conj()).real, 'g--', alpha=0.5, label='Observed')
     plt.legend()
-    plt.savefig('/home/landman/Projects/SmoothCal/figures/real.png', dpi = 250)
+    plt.savefig('/home/landman/Projects/SmoothCal/figures/Sim_real.png', dpi = 250)
 
     plt.figure('g.imag')
     plt.plot(tfull, (gfull[0,:]*gfull[1,:].conj()).imag, 'k', label='True')
@@ -182,7 +201,7 @@ if __name__=="__main__":
     plt.ylabel(r'$Imag(g_p g_q^\dagger)$', fontsize=18)
     #plt.plot(t, (gobs[0, :] * gobs[1, :].conj()).imag, 'g--', alpha=0.5, label='Observed')
     plt.legend()
-    plt.savefig('/home/landman/Projects/SmoothCal/figures/imag.png', dpi = 250)
+    plt.savefig('/home/landman/Projects/SmoothCal/figures/Sim_imag.png', dpi = 250)
 
 
 
@@ -192,11 +211,11 @@ if __name__=="__main__":
     plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp2[0, :] * gp2[1, :].conj()), 'g--', label='Smoothed StefCal')
     plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp3[0, :] * gp3[1, :].conj()), 'b--', label='StefCal')
     plt.plot(tfull, np.abs(gfull[0, :] * gfull[1, :].conj() - gp[0, :] * gp[1, :].conj()), 'k--', label='SmoothCal interp')
-    plt.fill_between(tfull, np.sqrt(np.diag(gcov2[0]).real + np.diag(gcov2[1]).real), np.zeros(Nfull), facecolor='b', alpha=0.5)
+    plt.fill_between(tfull, np.sqrt(np.diag(gcov[0]).real + np.diag(gcov[1]).real), np.zeros(Nfull), facecolor='b', alpha=0.5)
     plt.xlabel(r'$t$', fontsize=18)
     plt.ylabel(r'$|\epsilon|$', fontsize=18)
     plt.legend()
-    plt.savefig('/home/landman/Projects/SmoothCal/figures/error.png', dpi = 250)
+    plt.savefig('/home/landman/Projects/SmoothCal/figures/Sim_error.png', dpi = 250)
 
     plt.show()
 
