@@ -11,6 +11,7 @@ Here I define all the algorithms required for implementing SmoothCal.
 """
 
 import numpy as np
+import numpy.ma as ma
 import traceback
 import concurrent.futures as cf
 import psutil
@@ -36,8 +37,13 @@ def interpolate_impl(theta, tp, gmean, gobs, K, Ky, D, k):
     """
     This is for the gain interpolation
     """
-    gmean, gcov = Ky.interp(tp, theta, gobs, gmean)
-    return gmean, gcov, k
+    #print "%i theta = "%k, theta
+    #print "%i gobs = "%k, gobs[0:10]
+    #print "%i gmean = "%k, gmean
+    gfinal, gcov = Ky.interp(tp, theta, gobs, gmean)
+    #print "%i gfinal = " % k, gfinal[0:10]
+    print "%i gcov = "%k, np.diag(gcov)[0:10]
+    return gfinal, gcov, k
 
 def get_interp(theta, tp, gmean, gobs, K, Ky, D, Na):
     futures = []
@@ -86,6 +92,9 @@ def update_impl(g0, gobs0, A, V, Sigma, K, Ky, D, i, k):
     rhs_vec = rhs_vec - K._dot(Ky._idot(rhs_vec))
     gbar = (rhs_vec + g0) / 2.0
     #print (Ky.Sigmayinv*j).shape
+    # if any(j==0.0):
+    #     I = np.argwhere(j==0)
+    #     j[I] = g0[I]/(np.diag(Ky.Sigmayinv)[I])
     gobs = (Ky.Sigmayinv.dot(j) + gobs0)/2.0  # maximum likelihood solution for comparison
     return gbar, gobs, k
 
@@ -141,6 +150,9 @@ def stefcal_update_impl(g0, A, V, Sigma, Sigmay, i, k):
     """
     # compute data source i.e. j
     j = np.dot(A.T.conj(), V/Sigma)
+    if any(j==0.0):
+        I = np.argwhere(j==0)
+        j[I] = g0[I]*Sigmay[I]
     # do update
     gbar = (j/Sigmay + g0)/2.0  # maximum likelihood solution for comparison
     return gbar, k
@@ -282,7 +294,7 @@ def get_hypers(theta, V, A, W, K, Ky, D, g0):
             H += f.result()
     return H
 
-def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25):
+def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, thetas=None, tol=5e-3, maxiter=25):
     """
     The SmoothCal algorithm solves for the gains at times t
     Input:
@@ -302,15 +314,23 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25):
     assert Vpq.shape == (Na, Na, Nt)
     assert Xpq.shape == (Na, Na, Nt)
 
+    # for i in xrange(Nt):
+    #     print i
+    #     print Xpq[:,:,i]
+
     Nhypers = theta0.size
+    theta0 = ma.masked_array(data=theta0, mask=False)
 
     # set operators and data structures for doing per antennae solve
-    A = np.ma.masked_all((Na, Nt*Na, Nt), dtype=np.complex128) # to hold per-antenna response
-    V = np.ma.masked_all((Na, Na, Nt), dtype=np.complex128) # to hold per-antenna data
-    W = np.ma.masked_all((Na, Na, Nt), dtype=np.float64) # to hold weights
-    Sigma = np.zeros([Na, Na*Nt], dtype=np.complex128) # to hold per-antenna weights
-    Sigmay = np.zeros([Na, Nt], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
-    theta = np.zeros([Na, Nhypers]) # hyper-parameters excluding sigman
+    A = ma.masked_all((Na, Nt*Na, Nt), dtype=np.complex128) # to hold per-antenna response
+    V = ma.masked_all((Na, Na*Nt), dtype=np.complex128) # to hold per-antenna data
+    W = ma.masked_all((Na, Na*Nt), dtype=np.float64) # to hold weights
+    Sigma = ma.masked_all((Na, Na*Nt), dtype=np.float64) # to hold per-antenna weights
+    Sigmay = ma.masked_all((Na, Nt), dtype=np.float64) # to hold diagonal of Ad.Sigmainv.A
+    if thetas is not None:
+        theta = thetas
+    else:
+        theta = np.zeros([Na, Nhypers]) # hyper-parameters excluding sigman
     Klist = []  # list holding covariance operators
     Kylist = [] # list holding Ky operators
     Dlist = []  # list holding D operators
@@ -328,25 +348,41 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25):
         for p in xrange(Na):
             for j in xrange(Nt):
                 Rpt = Xpq[p, :, j]*(gold[:, j].conj())
-                #Robspt = Xpq[p, :, j] * (gobsold[:, j].conj())
-                #A[p*Na*Nt + j*Na:p*Na*Nt + j*Na + Na, p*Nt + j] = Rpt
                 A[p, j*Na:(j+1)*Na, j] = Rpt
                 #Aobs[p, j * Na:(j + 1) * Na, j] = Robspt
                 if i == 0:
-                    #V[p*Na*Nt + j*Na:p*Na*Nt + j*Na + Na] = Vpq[p,:,j]  # need to change this if autocor is False
                     V[p, j*Na:(j+1)*Na] = Vpq[p, :, j]
                     W[p, j*Na:(j+1)*Na] = Wpq[p, :, j]
+                    #print Wpq[p, :, j]
+                    #plt.pause(0.1)
+
             if i==0:
+                if any(W[p]==0):
+                    print W[p]
                 Sigma[p] = theta0[-1]**2/W[p]
+                tmp = np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p]))
                 Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
-                theta[p] = theta0 #+ deltheta*np.random.randn(Nhypers))  # want common sigman
+                if any(Sigmay[p] == 0.0):
+                    tmp = Sigmay[p].data
+                    I = np.argwhere(tmp==0)
+                    Sigmay[p,I] = 1.0e-10
+                if thetas is None:
+                    theta[p] = theta0 #+ deltheta*np.random.randn(Nhypers))  # want common sigman
                 Klist.append(ops.K_operator(t, theta0))
                 Kylist.append(ops.Ky_operator(Klist[p], Sigmay[p], solve_mode="full"))
                 Dlist.append(ops.D_operator(Klist[p], Kylist[p]))
             else:
                 Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
+                if any(Sigmay[p] == 0.0):
+                    tmp = Sigmay[p].data
+                    I = np.argwhere(tmp==0)
+                    Sigmay[p,I] = 1.0e-10
                 Kylist[p].update(Klist[p], Sigmay[p])
                 Dlist[p].update(Klist[p], Kylist[p])
+
+            if any(Sigmay[p]==0):
+                print "Shit at ", p
+
 
         # Solve for mean
         gbar, gobs = get_update(gold.copy(), gobsold.copy(), A, V, Sigma, Klist, Kylist, Dlist, i, Na)
@@ -382,11 +418,11 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
     assert Xpq.shape == (Na, Na, Nt)
 
     # set operators and data structures for doing per antennae solve
-    A = np.zeros([Na, Nt*Na, Nt], dtype=np.complex128) # to hold per-antenna response
-    V = np.zeros([Na, Nt*Na], dtype=np.complex128) # to hold per-antenna data
-    W = np.ones([Na, Nt*Na], dtype=np.float64) # to hold weights
-    Sigma = np.zeros([Na, Na*Nt], dtype=np.complex128) # to hold per-antenna weights
-    Sigmay = np.zeros([Na, Nt], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
+    A = ma.masked_all((Na, Nt*Na, Nt), dtype=np.complex128) # to hold per-antenna response
+    V = ma.masked_all((Na, Na*Nt), dtype=np.complex128) # to hold per-antenna data
+    W = ma.masked_all((Na, Na*Nt), dtype=np.float64) # to hold weights
+    Sigma = ma.masked_all((Na, Na*Nt), dtype=np.float64) # to hold per-antenna weights
+    Sigmay = ma.masked_all((Na, Nt), dtype=np.float64) # to hold diagonal of Ad.Sigmainv.A
 
     # initial guess for gains
     gbar = np.ones([Na, Nt], dtype=np.complex) # initial guess for posterior mean
@@ -406,8 +442,17 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
             if i==0:
                 Sigma[p] = W[p]
                 Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
+                if any(Sigmay[p] == 0.0):
+                    tmp = Sigmay[p].data
+                    I = np.argwhere(tmp==0)
+                    Sigmay[p,I] = 1.0e-10
+                    #Sigmay = ma.masked_equal(Sigmay, 0.0)
             else:
                 Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
+                if any(Sigmay[p] == 0.0):
+                    tmp = Sigmay[p].data
+                    I = np.argwhere(tmp==0)
+                    Sigmay[p,I] = 1.0e-10
 
         # Maximum likelihood solution
         gbar = get_stefcal_update(gold.copy(), A, V, Sigma, Sigmay, i, Na)
@@ -420,3 +465,58 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
         print "Maximum iterations reached"
 
     return gbar, Sigmay
+
+def plot_gains(gbar, gML, t, tp, gcov):
+    Na, Nt = gbar.shape
+
+    tmin = np.min(t)
+    tmax = np.max(t)
+    gmaxr = np.max(gbar.real)
+    gminr = np.min(gbar.real)
+    gmaxi = np.max(gbar.imag)
+    gmini = np.min(gbar.imag)
+    ref = 3
+    refmeanr = np.mean(gbar[ref, :].real)
+    refmeani = np.abs(np.mean(gbar[ref, :].imag))
+    for i in xrange(Na):
+        meanr = np.mean(gbar[i, :].real)
+        meani = np.abs(np.mean(gbar[i, :].imag))
+        if meani<1e-6:
+            meani = 1e-6
+        commeanr = np.mean((gbar[ref,:]*gbar[i, :].conj()).real)
+        commeani = np.abs(np.mean((gbar[ref, :] * gbar[i, :].conj()).imag))
+        if commeani<1e-6:
+            commeani = 1e-6
+        err = commeanr*np.sqrt(np.abs(np.diag(gcov[ref,:]))/np.abs(refmeanr)**2 + np.abs(np.diag(gcov[i, :]))/np.abs(meanr)**2)
+        print "err = ", err[0:10]
+        upper1s = (gbar[ref,:]*gbar[i, :].conj()).real + err
+        lower1s = (gbar[ref, :] * gbar[i, :].conj()).real - err
+        #print upper1s - lower1s
+        plt.figure('real')
+        plt.fill_between(tp, lower1s, upper1s, facecolor='b', alpha=0.5)
+        plt.plot(tp, (gbar[ref, :] * gbar[i, :].conj()).real, 'b')
+        plt.plot(t, (gML[ref, :] * gML[i, :].conj()).real, 'g--')
+        #plt.ylim(1.1*gminr, 1.1*gmaxr)
+        #plt.xlim(tmin, tmax)
+        plt.xlabel(r'$t$', fontsize=18)
+        plt.ylabel(r'$Real(g_p g_q^\dagger)$', fontsize=18)
+        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC.real'+str(i) +'.png', dpi = 250)
+        #plt.show()
+        plt.close()
+
+        eri = commeani * np.sqrt(np.abs(np.diag(gcov[ref, :])) / np.abs(refmeani) ** 2 + np.abs(np.diag(gcov[i, :])) / np.abs(meani) ** 2)
+        print "eri = ", eri[0:10]
+        plt.figure('imag')
+        upper1s = (gbar[ref,:]*gbar[i, :].conj()).imag + eri
+        lower1s = (gbar[ref, :] * gbar[i, :].conj()).imag - eri
+        #print upper1s - lower1s
+        plt.fill_between(tp, lower1s, upper1s, facecolor='b', alpha=0.5)
+        plt.plot(tp, (gbar[ref, :] * gbar[i, :].conj()).imag, 'b')
+        plt.plot(t, (gML[ref, :] * gML[i, :].conj()).imag, 'g--')
+        #plt.ylim(1.1*gmini, 1.1*gmaxi)
+        #plt.xlim(tmin, tmax)
+        plt.xlabel(r'$t$', fontsize=18)
+        plt.ylabel(r'$Imag(g_p g_q^\dagger)$', fontsize=18)
+        #plt.legend()
+        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC.imag'+str(i) +'.png', dpi = 250)
+        plt.close()
