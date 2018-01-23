@@ -106,9 +106,9 @@ if __name__=="__main__":
     ms.close()
 
     # set initial guess for covariance params
-    lGP = 0.65
-    sigmaf = 0.7
-    sigman = 0.025
+    lGP = 1.0
+    sigmaf = 2.0
+    sigman = 0.075
     theta0 = np.array([sigmaf, lGP, sigman])
     Nhypers = theta0.size
 

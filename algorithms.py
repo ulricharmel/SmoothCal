@@ -72,7 +72,7 @@ def update(*args, **kwargs):
         raise StandardError("Error occurred. Original traceback "
                             "is\n%s\n" % traceback_str)
 
-def update_impl(g0, gobs0, A, V, Sigma, K, Ky, D, i, k):
+def update_impl(g0, gobs0, A, V, Sigma, K, Ky, D, i, k, lam=0.5):
     """
     Here we compute the update for a single antenna.
     Input:
@@ -90,7 +90,8 @@ def update_impl(g0, gobs0, A, V, Sigma, K, Ky, D, i, k):
     j = np.dot(A.T.conj(), V/Sigma)
     rhs_vec = K._dot(j) + g0
     rhs_vec = rhs_vec - K._dot(Ky._idot(rhs_vec))
-    gbar = (rhs_vec + g0) / 2.0
+    #gbar = (rhs_vec + g0) / 2.0
+    gbar = (1.0-lam)*g0 + lam*rhs_vec
     #print (Ky.Sigmayinv*j).shape
     # if any(j==0.0):
     #     I = np.argwhere(j==0)
@@ -98,7 +99,7 @@ def update_impl(g0, gobs0, A, V, Sigma, K, Ky, D, i, k):
     gobs = (Ky.Sigmayinv.dot(j) + gobs0)/2.0  # maximum likelihood solution for comparison
     return gbar, gobs, k
 
-def get_update(g0, gobs0, A, V, Sigma, K, Ky, D, i, Na):
+def get_update(g0, gobs0, A, V, Sigma, K, Ky, D, i, Na, lam=0.5):
     """
     Here we compute the update for a single antenna. 
     Input:
@@ -115,7 +116,7 @@ def get_update(g0, gobs0, A, V, Sigma, K, Ky, D, i, Na):
     max_jobs = np.min(np.array([psutil.cpu_count(logical=False), Na]))
     with cf.ProcessPoolExecutor(max_workers=max_jobs) as executor:
         for k in xrange(Na):
-            future = executor.submit(update, g0[k], gobs0[k], A[k], V[k], Sigma[k], K[k], Ky[k], D[k], i, k)
+            future = executor.submit(update, g0[k], gobs0[k], A[k], V[k], Sigma[k], K[k], Ky[k], D[k], i, k, lam=lam)
             futures.append(future)
         for f in cf.as_completed(futures):
             g, gobs, k = f.result()
@@ -341,6 +342,7 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, thetas=None, tol=5e-3, maxiter=2
 
     # start iterations
     diff = 1.0
+    lam = 0.9
     i = 0
     while diff > tol and i < maxiter:
         gold = gbar.copy()
@@ -368,8 +370,8 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, thetas=None, tol=5e-3, maxiter=2
                     Sigmay[p,I] = 1.0e-10
                 if thetas is None:
                     theta[p] = theta0 #+ deltheta*np.random.randn(Nhypers))  # want common sigman
-                Klist.append(ops.K_operator(t, theta0))
-                Kylist.append(ops.Ky_operator(Klist[p], Sigmay[p], solve_mode="full"))
+                Klist.append(ops.K_operator(t, theta0, Sigmay=Sigmay[p], solve_mode="full"))
+                Kylist.append(ops.Ky_operator(Klist[p]))
                 Dlist.append(ops.D_operator(Klist[p], Kylist[p]))
             else:
                 Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
@@ -377,7 +379,8 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, thetas=None, tol=5e-3, maxiter=2
                     tmp = Sigmay[p].data
                     I = np.argwhere(tmp==0)
                     Sigmay[p,I] = 1.0e-10
-                Kylist[p].update(Klist[p], Sigmay[p])
+                Klist[p].update(theta0, Sigmay[p])
+                Kylist[p].update(Klist[p])
                 Dlist[p].update(Klist[p], Kylist[p])
 
             if any(Sigmay[p]==0):
@@ -385,8 +388,11 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, thetas=None, tol=5e-3, maxiter=2
 
 
         # Solve for mean
-        gbar, gobs = get_update(gold.copy(), gobsold.copy(), A, V, Sigma, Klist, Kylist, Dlist, i, Na)
+        diffold = diff
+        gbar, gobs = get_update(gold.copy(), gobsold.copy(), A, V, Sigma, Klist, Kylist, Dlist, i, Na, lam=lam)
         diff = np.max(np.abs(gbar-gold))
+        if diff>=(diffold - 0.2*diffold):
+            lam = 0.5*lam
 
         i += 1
         print "At iteration %i maximum difference is %f"%(i, diff)
@@ -494,29 +500,30 @@ def plot_gains(gbar, gML, t, tp, gcov):
         #print upper1s - lower1s
         plt.figure('real')
         plt.fill_between(tp, lower1s, upper1s, facecolor='b', alpha=0.5)
-        plt.plot(tp, (gbar[ref, :] * gbar[i, :].conj()).real, 'b')
-        plt.plot(t, (gML[ref, :] * gML[i, :].conj()).real, 'g--')
+        plt.plot(tp, (gbar[ref, :] * gbar[i, :].conj()).real, 'b', label=r'SmoothCal')
+        plt.plot(t, (gML[ref, :] * gML[i, :].conj()).real, 'g--', label='StefCal')
         #plt.ylim(1.1*gminr, 1.1*gmaxr)
         #plt.xlim(tmin, tmax)
         plt.xlabel(r'$t$', fontsize=18)
         plt.ylabel(r'$Real(g_p g_q^\dagger)$', fontsize=18)
-        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC2.real'+str(i) +'.png', dpi = 250)
+        plt.legend()
+        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC3.real'+str(i) +'.png', dpi = 250)
         #plt.show()
         plt.close()
 
-        eri = commeani * np.sqrt(np.abs(np.diag(gcov[ref, :])) / np.abs(refmeani) ** 2 + np.abs(np.diag(gcov[i, :])) / np.abs(meani) ** 2)
+        eri = 2*commeani * np.sqrt(np.abs(np.diag(gcov[ref, :])) / np.abs(refmeani) ** 2 + np.abs(np.diag(gcov[i, :])) / np.abs(meani) ** 2)
         print "eri = ", eri[0:10]
         plt.figure('imag')
         upper1s = (gbar[ref,:]*gbar[i, :].conj()).imag + eri
         lower1s = (gbar[ref, :] * gbar[i, :].conj()).imag - eri
         #print upper1s - lower1s
         plt.fill_between(tp, lower1s, upper1s, facecolor='b', alpha=0.5)
-        plt.plot(tp, (gbar[ref, :] * gbar[i, :].conj()).imag, 'b')
-        plt.plot(t, (gML[ref, :] * gML[i, :].conj()).imag, 'g--')
+        plt.plot(tp, (gbar[ref, :] * gbar[i, :].conj()).imag, 'b', label=r'SmoothCal')
+        plt.plot(t, (gML[ref, :] * gML[i, :].conj()).imag, 'g--', label='StefCal')
         #plt.ylim(1.1*gmini, 1.1*gmaxi)
         #plt.xlim(tmin, tmax)
         plt.xlabel(r'$t$', fontsize=18)
         plt.ylabel(r'$Imag(g_p g_q^\dagger)$', fontsize=18)
-        #plt.legend()
-        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC2.imag'+str(i) +'.png', dpi = 250)
+        plt.legend()
+        plt.savefig('/home/landman/Projects/SmoothCal/figures/SC3.imag'+str(i) +'.png', dpi = 250)
         plt.close()

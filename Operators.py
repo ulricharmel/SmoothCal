@@ -32,7 +32,7 @@ import pickle
 
 
 class K_operator(object):
-    def __init__(self, t, theta0, solve_mode="full", M=25, L=1.0, jit=1e-5):
+    def __init__(self, t, theta0, Sigmay, solve_mode="full", M=25, L=1.0, jit=1e-5):
         """
         This is a LinearOperator representation of the covariance matrix
         Input:
@@ -53,10 +53,12 @@ class K_operator(object):
         # set inputs
         self.t = t
 
+        self.Sigmay = Sigmay
+
         #from GP.kernels import exponential_squared
         #self.kernel = exponential_squared.sqexp()
         from GP.kernels import mattern
-        self.kernel = mattern.mattern(p=2, D=1)
+        self.kernel = mattern.mattern(p=2, D=1, Sigmay=self.Sigmay)
 
         # set covariance function and evaluate
         self.theta = theta0
@@ -150,8 +152,9 @@ class K_operator(object):
     #     rhs_vec = np.linalg.solve(tmp, PhiTSigmainvx)  # might be possible to do this better. Currently O(M^3)
     #     return Sigmainvx - self.Sigmainv.dot(self.Phi.dot(rhs_vec))
 
-    def update(self, theta):
+    def update(self, theta, Sigmay):
         self.theta = theta
+        self.Sigmay = Sigmay
         # set derivative
         #self.dcov_func = lambda theta, mode: self.kernel.dcov_func(theta, self.tt, self.val, mode=mode)
         if self.solve_mode=="full":
@@ -230,7 +233,7 @@ class K_operator(object):
 
 
 class Ky_operator(object):
-    def __init__(self, K, Sigmay, solve_mode="full"):
+    def __init__(self, K):
         """
         The Ky operator
         Input:
@@ -241,7 +244,7 @@ class Ky_operator(object):
         self.K = K
         #self.sigman = sigman
         #self.Sigmayinv = diags(1.0/Sigmay)
-        self.Sigmayinv = np.diag(1.0 / Sigmay)
+        self.Sigmayinv = np.diag(1.0 / self.K.Sigmay)
         #self.shape = self.K.shape
         #self.solve_mode = solve_mode
 
@@ -296,10 +299,10 @@ class Ky_operator(object):
     #     rhs_vec = np.linalg.solve(tmp, PhiTSigmainvx)  # might be possible to do this better. Currently O(M^3)
     #     return Sigmainvx - self.Sigmayinv.dot(self.K.Phi.dot(rhs_vec))
 
-    def update(self, K, Sigmay):
+    def update(self, K):
         self.K = K
         #self.Sigmayinv = diags(1.0 / Sigmay)
-        self.Sigmayinv = np.diag(1.0 / Sigmay)
+        self.Sigmayinv = np.diag(1.0 / self.K.Sigmay)
         #self.sigman = sigman
         if self.K.solve_mode == "full":
             # get cholesky decomp
