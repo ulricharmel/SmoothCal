@@ -24,10 +24,10 @@ from scipy.sparse.linalg import LinearOperator
 from scipy.sparse.linalg import cg
 from scipy.sparse import diags
 #import GP
-import nifty
+#import nifty
 import matplotlib.pyplot as plt
 import time
-from nifty import trace_probing
+#from nifty import trace_probing
 import pickle
 
 
@@ -440,17 +440,17 @@ class D_operator(object):
         else:
             raise NotImplementedError("Still working on faster solve_mode")
 
-class test_operator(nifty.operator):
-    def __init__(self, domain, target, func):
-        self.domain = domain
-        self.target = target
-        self.func = func
-        self.sym = True
-        self.uni = False
-        self.imp = True
-
-    def _multiply(self, x):
-        return self.func(x)
+# class test_operator(nifty.operator):
+#     def __init__(self, domain, target, func):
+#         self.domain = domain
+#         self.target = target
+#         self.func = func
+#         self.sym = True
+#         self.uni = False
+#         self.imp = True
+#
+#     def _multiply(self, x):
+#         return self.func(x)
 
 
 if __name__=="__main__":

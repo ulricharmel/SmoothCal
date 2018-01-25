@@ -426,3 +426,27 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
         print "Maximum iterations reached"
 
     return gbar, Sigmay
+
+
+def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
+    peak_flux = np.abs(ID.max())
+    stopping_flux = peak_flux*peak_fact
+    print "Peak flux = ", peak_flux, "Stopping flux = ", stopping_flux
+    IM = np.zeros_like(ID)
+    IR = ID.copy()
+    Npix = IM.shape[0]
+    j = 0
+    while j < maxiter and peak_flux > stopping_flux:
+        # get the position of the peak
+        p, q = np.argwhere(np.abs(IR) == peak_flux).squeeze()
+        IM[p, q] += gamma*peak_flux
+        Istar = IR[p, q]
+        IR -= gamma*Istar*PSF[Npix - p:2*Npix - p, Npix - q:2*Npix - q]
+        peak_flux = np.abs(IR).max()
+        j += 1
+    if j >= maxiter:
+        print "Maximum iterations reached"
+
+    print "Stopping flux = ", peak_flux
+    return IM, IR
+
