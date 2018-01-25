@@ -61,10 +61,8 @@ def RH(Xpq, upq, vpq, lm, ID):
     for i, pq in enumerate(iter(pqlist)):
         p = int(pq[0]) - 1
         q = int(pq[1]) - 1
-        gp = g_target[p, :]
-        gqH = g_target[q, :].conj()
-        uv = np.vstack((upq_target[i, :], vpq_target[i, :]))
-        X = Vpq_target[p, q, :]
+        uv = np.vstack((upq[i, :], vpq[i, :]))
+        X = Xpq[p, q, :]
         K = np.exp(-2.0j * np.pi * np.dot(lm.T, uv.conj()))
         ID_flat += np.dot(K, X).real
     ID = ID_flat.reshape(Npix, Npix)
