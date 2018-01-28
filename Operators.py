@@ -32,7 +32,7 @@ import pickle
 
 
 class K_operator(object):
-    def __init__(self, t, theta0, solve_mode="full", M=25, L=1.0, jit=1e-5):
+    def __init__(self, t, theta0, solve_mode="full", M=25, L=1.0, jit=1e-4):
         """
         This is a LinearOperator representation of the covariance matrix
         Input:
@@ -385,6 +385,7 @@ class D_operator(object):
         self.Ky = Ky
         #self.Sigmay = diags(1.0/self.Ky.Sigmayinv.diagonal())
         self.Sigmay = np.diag(1.0 / np.diag(self.Ky.Sigmayinv))
+        self.val = self.K.val - self.K.val.dot(self.Ky._idot(self.K.val))  ##### remomber to check mode==full here
 
     def _dot(self, x):
         tmp = self.K._dot(x)

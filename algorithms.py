@@ -283,7 +283,7 @@ def get_hypers(theta, V, A, W, K, Ky, D, g0):
             H += f.result()
     return H
 
-def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25):
+def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25, gbar=None, gobs=None):
     """
     The SmoothCal algorithm solves for the gains at times t
     Input:
@@ -317,11 +317,13 @@ def SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5e-3, maxiter=25):
     Dlist = []  # list holding D operators
 
     # initial guess for gains
-    gbar = np.ones([Na, Nt], dtype=np.complex) # initial guess for posterior mean
-    gobs = np.ones([Na, Nt], dtype=np.complex)  # initial guess for maximum likelihood solution
+    if gbar is None:
+        gbar = np.ones([Na, Nt], dtype=np.complex) # initial guess for posterior mean
+    if gobs is None:
+        gobs = np.ones([Na, Nt], dtype=np.complex)  # initial guess for maximum likelihood solution
 
     # start iterations
-    lam=0.9
+    lam=0.5
     diff = 1.0
     i = 0
     while diff > tol and i < maxiter:
@@ -410,7 +412,7 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
                     V[p, j*Na:(j+1)*Na] = Vpq[p, :, j]
                     W[p, j*Na:(j+1)*Na] = Wpq[p, :, j]
             if i==0:
-                Sigma[p] = W[p]
+                Sigma[p] = 1.0/W[p]
                 Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
             else:
                 Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
@@ -441,7 +443,7 @@ def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
         p, q = np.argwhere(np.abs(IR) == peak_flux).squeeze()
         IM[p, q] += gamma*peak_flux
         Istar = IR[p, q]
-        IR -= gamma*Istar*PSF[Npix - p:2*Npix - p, Npix - q:2*Npix - q]
+        IR -= gamma*Istar*PSF[Npix-1 - p:(2*Npix-1) - p, Npix-1 - q:(2*Npix-1) - q]
         peak_flux = np.abs(IR).max()
         j += 1
     if j >= maxiter:
