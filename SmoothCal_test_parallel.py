@@ -23,6 +23,7 @@ from GP.tools import draw_samples
 #from pyrap.tables import table as pt
 from astropy.io import fits
 from astropy import wcs
+from utils import *
 
 # def solve_hypers():
 #     # solve for hypers
@@ -79,138 +80,7 @@ from astropy import wcs
 #     plt.plot(t, cov_func(t, thetas))
 #     plt.show()
 
-def R(IM, upq, vpq, lm, pqlist, Xpq):
-    """
-    The response operator coded as a DFT
-    :param IM: Npix x Npix array containing model image
-    :param upq: Na x Nt array of baseline coordinates
-    :param vpq: Na x Nt array of baseline coordinates
-    :param lm: 2 x Npix**2 array of sky coordinates
-    :param pqlist: a list of antennae pairs (used for the iterator)
-    :param Xpq: Na x Na x Nt array to hold model visibilities
-    :return: Xpq the model visibilities
-    """
-    IMflat = IM.flatten()
-    Nt = upq.shape[1]
-    for i, pq in enumerate(iter(pqlist)):
-        p = int(pq[0])-1
-        q = int(pq[1])-1
-        for j in xrange(Nt):
-            uv = np.array([upq[i,j], vpq[i,j]])
-            K = np.exp(-2.0j*np.pi*np.dot(uv,lm))
-            #print K.shape, uv.shape, lm.shape, IMflat.shape
-            Xpq[p,q,j] = np.dot(K, IMflat)
-            Xpq[q,p,j] = Xpq[p,q,j].conj()
-    return Xpq
 
-def RH(Xpq, Wpq, upq, vpq, lm, ID, PSFmax):
-    """
-    The adjoint of the DFT response operator
-    :param Xpq: Na x Na x Nt array containing model visibilities
-    :param upq: Na x Nt array of baseline coordinates
-    :param vpq: Na x Nt array of baseline coordinates
-    :param lm: 2 x Npix**2 array of sky coordinates
-    :param ID: Npix x Npix array to hold resulting image
-    :return: 
-    """
-    ID_flat = ID.flatten()
-    for i, pq in enumerate(iter(pqlist)):
-        p = int(pq[0]) - 1
-        q = int(pq[1]) - 1
-        uv = np.vstack((upq[i, :], vpq[i, :]))
-        X = Xpq[p, q, :]*Wpq[p, q, :]
-        K = np.exp(-2.0j * np.pi * np.dot(lm.T, uv.conj()))
-        ID_flat += np.dot(K, X).real
-    ID = ID_flat.reshape(ID.shape)
-    return ID/PSFmax
-
-def plot_vis(Xpq, Xpq_corrected, Xpq_corrected2, upq, vpq, p, q):
-    # plot absolute value of visibilities as function of baseline length
-    plt.figure('visabs')
-    plt.plot(np.abs(upq[p,:] - vpq[q,:]), np.abs(Xpq[p,q,:]), 'k+', label='True vis')
-    plt.plot(np.abs(upq[p, :] - vpq[q, :]), np.abs(Xpq_corrected[p, q, :]), 'b+', label='Corrected vis 1')
-    plt.plot(np.abs(upq[p, :] - vpq[q, :]), np.abs(Xpq_corrected2[p, q, :]), 'g+', label='Corrected vis 2')
-    plt.savefig('/home/landman/Projects/SmoothCal/figures/abs_vis_compare.png', dpi=250)
-    # plot phase of visibilities as function of baseline length
-    plt.figure('visphase')
-    plt.plot(np.abs(upq[p,:] - vpq[q,:]), np.arctan(Xpq[p,q,:].imag/Xpq[p,q,:].real), 'k+', label='True vis')
-    plt.plot(np.abs(upq[p, :] - vpq[q, :]), np.arctan(Xpq_corrected[p,q,:].imag/Xpq_corrected[p,q,:].real), 'b+', label='Corrected vis 1')
-    plt.plot(np.abs(upq[p, :] - vpq[q, :]), np.arctan(Xpq_corrected2[p,q,:].imag/Xpq_corrected[p,q,:].real), 'g+', label='Corrected vis 2')
-    plt.savefig('/home/landman/Projects/SmoothCal/figures/phase_vis_compare.png', dpi=250)
-    return
-
-def plot_fits(IM, IR, ID, name):
-    # save images to fits
-    hdu = fits.PrimaryHDU(ID)
-    hdul = fits.HDUList([hdu])
-    hdul.writeto('/home/landman/Projects/SmoothCal/figures/ID_' + name + '.fits', overwrite=True)
-    hdul.close()
-
-    hdu = fits.PrimaryHDU(IM)
-    hdul = fits.HDUList([hdu])
-    hdul.writeto('/home/landman/Projects/SmoothCal/figures/IM_' + name + '.fits', overwrite=True)
-    hdul.close()
-
-    hdu = fits.PrimaryHDU(IR)
-    hdul = fits.HDUList([hdu])
-    hdul.writeto('/home/landman/Projects/SmoothCal/figures/IR_' + name + '.fits', overwrite=True)
-    hdul.close()
-    return
-
-def plot_gains(tfull, gfull_true, Sigmay_full, gbar_full, gbar_stef_full, pqlist):
-    for i, pq in  enumerate(iter(pqlist)):
-        p = int(pq[0])-1
-        q = int(pq[1])-1
-
-        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 9))
-        ax[0].fill_between(tfull, (gfull_true[p]*gfull_true[q].conj()).real + np.sqrt(1.0/Sigmay_full[p] + 1.0/Sigmay_full[q])/np.sqrt(2),
-                           (gfull_true[p] * gfull_true[q].conj()).real - np.sqrt(1.0 / Sigmay_full[p] + 1.0 / Sigmay_full[q])/np.sqrt(2),
-                           facecolor='b', alpha=0.25)
-        ax[0].plot(tfull, (gfull_true[p]*gfull_true[q].conj()).real, 'k', label='True')
-        ax[0].plot(tfull, (gbar_full[p]*gbar_full[q].conj()).real, 'b--', alpha=0.5, label='SmoothCal')
-        ax[0].plot(tfull, (gbar_stef_full[p,:]*gbar_stef_full[q, :].conj()).real, 'g--', alpha=0.5, label='StefCal')
-        #ax[0].errorbar(tfull, (gfull_true[0]*gfull_true[1].conj()).real, np.sqrt(1.0/Sigmay_full[0] + 1.0/Sigmay_full[1]), fmt='xr', alpha=0.25)
-        ax[0].set_xlabel(r'$t$', fontsize=18)
-        ax[0].set_ylabel(r'$Real(g_p g_q^\dagger)$', fontsize=18)
-        #ax[0].legend()
-
-        ax[1].fill_between(tfull, (gfull_true[p] * gfull_true[q].conj()).imag + np.sqrt(1.0 / Sigmay_full[p] + 1.0 / Sigmay_full[q])/np.sqrt(2),
-                           (gfull_true[p] * gfull_true[q].conj()).imag - np.sqrt(1.0 / Sigmay_full[p] + 1.0 / Sigmay_full[q])/np.sqrt(2),
-                           facecolor='b', alpha=0.25)
-        ax[1].plot(tfull, (gfull_true[p] * gfull_true[q].conj()).imag, 'k', label='True')
-        ax[1].plot(tfull, (gbar_full[p] * gbar_full[q].conj()).imag, 'b--', alpha=0.5, label='SmoothCal')
-        ax[1].plot(tfull, (gbar_stef_full[p, :] * gbar_stef_full[q, :].conj()).imag, 'g--', alpha=0.5, label='StefCal')
-        #ax[1].errorbar(tfull, (gfull_true[0] * gfull_true[1].conj()).imag, np.sqrt(1.0/Sigmay_full[0] + 1.0/Sigmay_full[1]), fmt='xr', alpha=0.25)
-        ax[1].set_xlabel(r'$t$', fontsize=18)
-        ax[1].set_ylabel(r'$Imag(g_p g_q^\dagger)$', fontsize=18)
-        ax[1].legend(loc=2)
-
-        fig.savefig('/home/landman/Projects/SmoothCal/figures/Full_sim_combined'+str(p)+str(q) +'.png', dpi = 250)
-
-        # plot errors
-        plt.figure('error2')
-        plt.plot(tfull, np.abs(gfull_true[p] * gfull_true[q].conj() - gbar_full[p] * gbar_full[q].conj()), 'k.', label='SmoothCal')
-        plt.plot(tfull, np.abs(gfull_true[p, :] * gfull_true[q, :].conj() - gbar_stef_full[p, :] * gbar_stef_full[q, :].conj()), 'g--', label='StefCal')
-        plt.fill_between(tfull, np.sqrt(np.diag(Dlist_full[p].val).real + np.diag(Dlist_full[q].val).real), np.zeros(Nfull), facecolor='b', alpha=0.5)
-        plt.xlabel(r'$t$', fontsize=18)
-        plt.ylabel(r'$|\epsilon|$', fontsize=18)
-        plt.legend()
-        plt.savefig('/home/landman/Projects/SmoothCal/figures/Sim_error_combined'+str(p)+str(q) +'.png', dpi = 250)
-
-        #plt.show()
-        plt.close('all')
-    return
-
-def apply_gains(Vpq, g, pqlist, Nt, Xpq):
-    for i, pq in enumerate(iter(pqlist)):
-        p = int(pq[0])-1
-        q = int(pq[1])-1
-        gptemp = g[p]
-        gqtempH = g[q].conj()
-        for j in xrange(Nt):
-            Xpq[p, q, j] = Vpq[p, q, j]/(gptemp[j]*gqtempH[j])
-            Xpq[q, p, j] = Xpq[p, q, j].conj()
-    return Xpq
 
 if __name__=="__main__":
     Nfull = 950
@@ -240,7 +110,7 @@ if __name__=="__main__":
     # set covariance params
     lGP = 0.35
     sigmaf = 0.05
-    sigman = 0.1
+    sigman = 1.0
     theta0 = np.array([sigmaf, lGP, sigman])
     Nhypers = theta0.size
 
@@ -393,17 +263,21 @@ if __name__=="__main__":
     # set weights
     Wpq = np.ones_like(Vpq, dtype=np.float64)
 
+    pqtup = []
+    for i, pq in enumerate(iter(pqlist)):
+        pqtup.append((int(pq[0]) - 1, int(pq[1]) - 1))
+
     # run Smoothcal cycle
     theta0[0] = np.sqrt(2)*sigmaf
     theta0[-1] = np.sqrt(2) * sigman
-    gbar_smooth, gobs_smooth, Klist, Kylist, Dlist, theta = algos.SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=1.0e-4, maxiter=25)
+    gbar_smooth, gobs_smooth, Klist, Kylist, Dlist, theta = algos.SmoothCal(Na, Nt, Xpq, Vpq, Wpq, t, theta0, tol=5.0e-3, maxiter=25)
 
     # Do interpolation
     meanval = np.mean(gbar_smooth, axis=1)
     gmean_smooth, gcov_smooth = algos.get_interp(theta, tfull, meanval, gobs_smooth, Klist, Kylist, Dlist, Na)
 
     # do StefCal cycle
-    gbar_stef, Sigmay = algos.StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=1.0e-4, maxiter=25)
+    gbar_stef, Sigmay = algos.StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5.0e-3, maxiter=25)
 
     # interpolate using StefCal data
     for i in xrange(Na):
@@ -482,7 +356,7 @@ if __name__=="__main__":
     # make the dirty image
     print "Making perfect Dirty"
     ID = np.zeros([Npix, Npix])
-    ID = RH(Xpq_target, Wpq_target, upq_target, vpq_target, lm, ID, PSFmax)
+    ID = RH(Xpq_target, Wpq_target, upq_target, vpq_target, lm, ID, PSFmax, pqlist)
 
     print "Cleaning"
     IM, IR = algos.Hogbom(ID, PSF, peak_fact=1e-8)
@@ -492,7 +366,7 @@ if __name__=="__main__":
     # Now try clean uncalibrated data
     print "Making uncalibrated Dirty"
     IDu = np.zeros([Npix, Npix])
-    IDu = RH(Vpq_target,  Wpq_target, upq_target, vpq_target, lm, IDu, PSFmax)
+    IDu = RH(Vpq_target,  Wpq_target, upq_target, vpq_target, lm, IDu, PSFmax, pqlist)
 
     print "Cleaning"
     IMu, IRu = algos.Hogbom(IDu, PSF, peak_fact=5e-3)
@@ -507,10 +381,10 @@ if __name__=="__main__":
     # image corrected vis
     print "Making StefCal Dirty"
     ID_Stef = np.zeros([Npix, Npix])
-    ID_Stef = RH(Xpq_corrected_Stef, Wpq_target, upq_target, vpq_target, lm, ID_Stef, PSFmax)
+    ID_Stef = RH(Xpq_corrected_Stef, Wpq_target, upq_target, vpq_target, lm, ID_Stef, PSFmax, pqlist)
 
     print "Cleaning"
-    IM_Stef, IR_Stef = algos.Hogbom(ID_Stef, PSF, peak_fact=1.0e-3)
+    IM_Stef, IR_Stef = algos.Hogbom(ID_Stef, PSF, peak_fact=5.0e-3)
 
     # save images to fits
     plot_fits(IM_Stef, IR_Stef, ID_Stef, 'Stef')
@@ -523,10 +397,10 @@ if __name__=="__main__":
     # image corrected vis
     print "Making SmoothCal Dirty"
     ID_Smooth = np.zeros([Npix, Npix])
-    ID_Smooth = RH(Xpq_corrected_Smooth, Wpq_target, upq_target, vpq_target, lm, ID_Smooth, PSFmax)
+    ID_Smooth = RH(Xpq_corrected_Smooth, Wpq_target, upq_target, vpq_target, lm, ID_Smooth, PSFmax, pqlist)
 
     print "Cleaning"
-    IM_Smooth, IR_Smooth = algos.Hogbom(ID_Smooth, PSF, peak_fact=1.0e-3)
+    IM_Smooth, IR_Smooth = algos.Hogbom(ID_Smooth, PSF, peak_fact=5.0e-3)
 
     plot_fits(IM_Smooth, IR_Smooth, ID_Smooth, 'Smooth')
 
@@ -574,10 +448,10 @@ if __name__=="__main__":
     # make reweighted dirty
     print "Making reweighted Dirty image"
     ID_weighted = np.zeros([Npix, Npix])
-    ID_weighted = RH(Xpq_corrected_Smooth, Wpq_reweighted, upq_target, vpq_target, lm, ID_weighted, PSF_weighted_max)
+    ID_weighted = RH(Xpq_corrected_Smooth, Wpq_reweighted, upq_target, vpq_target, lm, ID_weighted, PSF_weighted_max, pqlist)
 
     print "Cleaning"
-    IM_weighted, IR_weighted = algos.Hogbom(ID_weighted, PSF_weighted, peak_fact=1.0e-3)
+    IM_weighted, IR_weighted = algos.Hogbom(ID_weighted, PSF_weighted, peak_fact=5.0e-3)
 
     # save images to fits
     plot_fits(IM_weighted, IR_weighted, ID_weighted, 'weighted')
@@ -603,7 +477,7 @@ if __name__=="__main__":
 
     # do SmoothCal on combined data sets
     gbar_full, gobs_full, Klist_full, Kylist_full, Dlist_full, theta = algos.SmoothCal(Na, Nfull, Xpq_full, Vpq_full,
-                                                                                       Wpq_full, tfull, theta0, tol=1e-4,
+                                                                                       Wpq_full, tfull, theta0, tol=5e-4,
                                                                                        maxiter=25, gbar=gmean_smooth)#,
                                                                                        #gobs=gbar_stef_lin_interp)
     # get StefCal model visibilities
@@ -611,7 +485,7 @@ if __name__=="__main__":
     Xpq_pred_stef = R(IM_Stef, upq_target, vpq_target, lm, pqlist, Xpq_pred_stef)
 
     # do StefCal self calibration
-    gbar_stef_target, Sigmay_target = algos.StefCal(Na, N_target, Xpq_pred_stef, Vpq_target, Wpq_target, tp, tol=1e-3, maxiter=25) #Xpq_pred_stef
+    gbar_stef_target, Sigmay_target = algos.StefCal(Na, N_target, Xpq_pred_stef, Vpq_target, Wpq_target, tp, tol=5e-4, maxiter=25) #Xpq_pred_stef
     gbar_stef_full = np.zeros([Na, Nfull], dtype=np.complex128)
     gbar_stef_full[:,I] = gbar_stef
     gbar_stef_full[:, I2] = gbar_stef_target
@@ -631,10 +505,10 @@ if __name__=="__main__":
     # make dirty image
     print "Making SelfCal Dirty"
     ID_SelfCal = np.zeros([Npix, Npix])
-    ID_SelfCal = RH(Xpq_corrected_SelfCal, Wpq_target, upq_target, vpq_target, lm, ID_SelfCal, PSFmax)
+    ID_SelfCal = RH(Xpq_corrected_SelfCal, Wpq_target, upq_target, vpq_target, lm, ID_SelfCal, PSFmax, pqlist)
 
     print "Cleaning"
-    IM_SelfCal, IR_SelfCal = algos.Hogbom(ID_SelfCal, PSF, peak_fact=5.0e-4)
+    IM_SelfCal, IR_SelfCal = algos.Hogbom(ID_SelfCal, PSF, peak_fact=5.0e-3)
 
     # save images to fits
     plot_fits(IM_SelfCal, IR_SelfCal, ID_SelfCal, 'SelfCal')
