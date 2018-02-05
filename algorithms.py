@@ -452,3 +452,29 @@ def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
     print "Stopping flux = ", peak_flux
     return IM, IR
 
+def Average_over_time(Na, Nt, Xpq, Vpq, Wpq, Nt_interval, gpred):
+    """
+    Averages over Nt_interval time samples 
+    :param Na: 
+    :param Nt: 
+    :param Xpq: 
+    :param Vpq: 
+    :param Wpq: 
+    :param Nt_interval: 
+    :return: 
+    """
+    Nt_new = Nt//Nt_interval
+    A = np.zeros([Na, Nt_new*Na, Nt_new], dtype=np.complex128) # to hold per-antenna response
+    V = np.zeros([Na, Nt_new*Na], dtype=np.complex128) # to hold per-antenna data
+    W = np.ones([Na, Nt_new*Na], dtype=np.float64) # to hold weights
+    Sigma = np.zeros([Na, Na*Nt_new], dtype=np.complex128) # to hold per-antenna weights
+    Sigmay = np.zeros([Na, Nt_new], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
+    for p in xrange(Na):
+        for j in xrange(Nt_new):
+            Rpt = Xpq[p, :, j] * (gpred[:, j].conj())
+            A[p, j * Na:(j + 1) * Na, j] = Rpt
+            V[p, j * Na:(j + 1) * Na] = Vpq[p, :, j]
+            W[p, j * Na:(j + 1) * Na] = Wpq[p, :, j]
+        Sigma[p] = 1.0 / W[p]
+        Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0 / Sigma[p]).dot(A[p])))
+    return
