@@ -452,7 +452,7 @@ def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
     print "Stopping flux = ", peak_flux
     return IM, IR
 
-def Average_over_time(Na, Nt, Xpq, Vpq, Wpq, Nt_interval, gpred):
+def Average_over_time(Na, Nt, Xpq, Vpq, Wpq, Nbin, gpred, t):
     """
     Averages over Nt_interval time samples 
     :param Na: 
@@ -463,7 +463,11 @@ def Average_over_time(Na, Nt, Xpq, Vpq, Wpq, Nt_interval, gpred):
     :param Nt_interval: 
     :return: 
     """
-    Nt_new = Nt//Nt_interval
+    # get new number of time bins
+    Nt_new = Nt//Nbin
+    # find new bin centers
+    t_new = np.linspace(t[0], t[-1], Nt_new)
+    # set up storage arrays
     A = np.zeros([Na, Nt_new*Na, Nt_new], dtype=np.complex128) # to hold per-antenna response
     V = np.zeros([Na, Nt_new*Na], dtype=np.complex128) # to hold per-antenna data
     W = np.ones([Na, Nt_new*Na], dtype=np.float64) # to hold weights
@@ -471,10 +475,13 @@ def Average_over_time(Na, Nt, Xpq, Vpq, Wpq, Nt_interval, gpred):
     Sigmay = np.zeros([Na, Nt_new], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
     for p in xrange(Na):
         for j in xrange(Nt_new):
-            Rpt = Xpq[p, :, j] * (gpred[:, j].conj())
+            # get averaged quantities
+            tmp = Xpq[p, :, j*Nbin:(j+1)*Nbin] * gpred[:, j*Nbin:(j+1)*Nbin].conj()
+            print tmp.shape
+            Rpt = np.mean(tmp, axis=1)
             A[p, j * Na:(j + 1) * Na, j] = Rpt
-            V[p, j * Na:(j + 1) * Na] = Vpq[p, :, j]
-            W[p, j * Na:(j + 1) * Na] = Wpq[p, :, j]
+            V[p, j * Na:(j + 1) * Na] = np.mean(Vpq[p, :, j*Nbin:(j+1)*Nbin], axis=1)
+            W[p, j * Na:(j + 1) * Na] = np.mean(Wpq[p, :, j*Nbin:(j+1)*Nbin], axis=1)
         Sigma[p] = 1.0 / W[p]
         Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0 / Sigma[p]).dot(A[p])))
-    return
+    return A, V, Sigmay, t_new, Nt_new
