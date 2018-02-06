@@ -15,8 +15,10 @@ Test if solution interval idea is going to work. The idea is as follows:
 import numpy as np
 import algorithms as algos
 import itertools as it
+from utils import apply_gains, R, RH, plot_fits
 from GP.tools import draw_samples
 from GP import temporal_GP
+from astropy.io import fits
 import matplotlib.pyplot as plt
 
 if __name__=="__main__":
@@ -196,6 +198,7 @@ if __name__=="__main__":
     thetaf = []
     theta0[0] = np.sqrt(2.0)*sigmaf
     theta0[-1] = np.sqrt(2.0)*sigman
+    gsmooth = np.zeros_like(g_target)
     for i in xrange(Na):
         print "GPR on antenna ", str(i)
         # define mean function for antenna i
@@ -210,13 +213,58 @@ if __name__=="__main__":
         GPobj.set_posterior(thetafi)
         GPlist.append(GPobj)
         meani = GPobj.post_mean.squeeze()
+        gsmooth[i, :] = meani[I2]
         uncerti = np.sqrt(np.diag(GPobj.post_cov))
 
-        plt.figure('i')
-        plt.fill_between(tfull, meani.real + uncerti.real, meani.real - uncerti.real, facecolor='b', alpha=0.4)
-        plt.plot(tfull, meani.real, 'k')
-        plt.errorbar(t, gbar_stef[i, :].real, Sigmay[i], fmt='xr')
-        plt.show()
+        # plt.figure('i')
+        # plt.fill_between(tfull, meani.real + uncerti.real, meani.real - uncerti.real, facecolor='b', alpha=0.4)
+        # plt.plot(tfull, meani.real, 'k')
+        # plt.errorbar(t, gbar_stef[i, :].real, Sigmay[i], fmt='xr', alpha=0.5)
+        # plt.show()
+
+    # apply interpolated gains
+    Vpq_corrected = np.zeros_like(Vpq_target)
+    Vpq_corrected = apply_gains(Vpq_target, gsmooth, pqlist, N_target, Vpq_corrected)
+
+    # make the PSF
+    Wpq_target = np.ones_like(Vpq_target, dtype=np.float64) # need to propagate uncertainties on gains eventually
+    lPSF = np.linspace(-2*lmax, 2*lmax, 2*Npix-1)
+    mPSF = np.linspace(-2*mmax, 2*mmax, 2*Npix-1)
+    llPSF, mmPSF = np.meshgrid(lPSF, mPSF)
+    lmPSF = (np.vstack((llPSF.flatten(), mmPSF.flatten())))
+    PSF = np.zeros([2*Npix-1, 2*Npix-1])
+    PSFflat = PSF.flatten()
+    print "Making PSF"
+    for i, pq in enumerate(iter(pqlist)):
+        p = int(pq[0]) - 1
+        q = int(pq[1]) - 1
+        uv = np.vstack((upq_target[i, :], vpq_target[i, :]))
+        W = Wpq_target[p, q, :]
+        K = np.exp(-2.0j * np.pi * np.dot(lmPSF.T, uv.conj()))
+        PSFflat += np.dot(K, W).real
+
+    PSFmax = PSFflat.max()
+    PSFflat /= PSFmax
+    PSF = PSFflat.reshape(2*Npix-1, 2*Npix-1)
+
+    hdu = fits.PrimaryHDU(PSF)
+    hdul = fits.HDUList([hdu])
+    hdul.writeto('/home/landman/Projects/SmoothCal/figures/PSF_sol_int.fits', overwrite=True)
+    hdul.close()
+
+    # image corrected data
+    print "Making perfect Dirty"
+    ID = np.zeros([Npix, Npix])
+    ID = RH(Xpq_target, Wpq_target, upq_target, vpq_target, lm, ID, pqlist, PSFmax)
+
+    # do the initial deconvolution
+    print "Cleaning initial corrected data"
+    IM, IR = algos.Hogbom(ID, PSF, peak_fact=1e-1)
+
+    # plot deconvolution result
+    plot_fits(IM, IR, ID, '1GC')
+
+    # get JHJ
 
     # compute sum of differences
 
