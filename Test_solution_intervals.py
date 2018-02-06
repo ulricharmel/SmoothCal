@@ -15,18 +15,19 @@ Test if solution interval idea is going to work. The idea is as follows:
 import numpy as np
 import algorithms as algos
 import itertools as it
-import GP
+from GP.tools import draw_samples
+from GP import temporal_GP
 import matplotlib.pyplot as plt
 
 if __name__=="__main__":
     # set save path
     savepath = '/home/landman/Projects/SmoothCal/figures/'
     # set the data
-    Nfull = 950
+    Nfull = 550
     tfull = np.linspace(-5.5, 5.5, Nfull)
     # set time domain
     interval = 50
-    Nt = 500
+    Nt = 300
     I = np.arange(interval)  # data index
     I2 = np.arange(interval, 2*interval)
     t = tfull[0:interval]
@@ -40,7 +41,7 @@ if __name__=="__main__":
             tp = np.append(tp, tfull[i * interval:(i + 1) * interval])
 
     # number of antennae
-    Na = 9
+    Na = 4
 
     # set mean functions for real and imaginary parts
     meanfr = np.ones(Nfull, dtype=np.float64)
@@ -57,7 +58,7 @@ if __name__=="__main__":
     def cov_func(x, theta):
         return theta[0]**2*np.exp(-x**2/(2*theta[1]**2))
     # draw some random gain realisations
-    gfull_true = GP.tools.draw_samples.draw_samples(meanfr, tfull, theta0, cov_func, Na) + 1.0j*GP.tools.draw_samples.draw_samples(meanfi, tfull, theta0, cov_func, Na)
+    gfull_true = draw_samples.draw_samples(meanfr, tfull, theta0, cov_func, Na) + 1.0j*draw_samples.draw_samples(meanfi, tfull, theta0, cov_func, Na)
 
     # get true gains for calibrator field
     g = np.zeros([Na, Nt], dtype=np.complex128)
@@ -77,8 +78,8 @@ if __name__=="__main__":
     ll, mm = np.meshgrid(l, m)
     lm = (np.vstack((ll.flatten(), mm.flatten())))
     IM = np.zeros([Npix, Npix])
-    IM[Npix//2, Npix//2] = 100.0
-    IM[Npix//4, Npix//4] = 10.0
+    IM[Npix//2, Npix//2] = 15.0
+    IM[Npix//4, Npix//4] = 7.5
     IM[3*Npix//4, 3*Npix//4] = 5.0
     IM[Npix//4, 3*Npix//4] = 2.5
     IM[3*Npix//4, Npix//4] = 1.0
@@ -183,14 +184,39 @@ if __name__=="__main__":
             Vpq_target[q, p, j] = Vpq_target[p, q, j].conj()
 
     # set weights
-    Wpq = np.ones_like(Vpq, dtype=np.float64)
+    Wpq = np.ones_like(Vpq, dtype=np.float64)/np.sqrt(2.0)
 
     # do StefCal cycle
-    gbar_stef, Sigmay = algos.StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5.0e-3, maxiter=25)
+    gbar_stef, JHJ = algos.StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5.0e-2, maxiter=25)
+    Sigmay = np.sqrt(1.0/JHJ)
 
     # interpolate using StefCal data
     meanval = np.mean(gbar_stef, axis=1)
+    GPlist = []
+    thetaf = []
+    theta0[0] = np.sqrt(2.0)*sigmaf
+    theta0[-1] = np.sqrt(2.0)*sigman
     for i in xrange(Na):
-        GP = GP.temporal_GP.TemporalGP(t, tfull, y, prior_mean=yf, covariance_function='sqexp', mode=mode, M=25, L=20)
+        print "GPR on antenna ", str(i)
+        # define mean function for antenna i
+        meanf = lambda x: np.ones(x.size)*meanval[i]
+        # initialise GP object for antenna i
+        GPobj = temporal_GP.TemporalGP(t, tfull, gbar_stef[i, :], Sigmay=Sigmay[i], prior_mean=meanf,
+                                          covariance_function='sqexp', mode="Full", M=25, L=20)
+        # train GP for antenna i
+        thetafi = GPobj.train(theta0)
+        print thetafi
+        thetaf.append(thetafi)  # need to reuse this later to reset the posterior
+        GPobj.set_posterior(thetafi)
+        GPlist.append(GPobj)
+        meani = GPobj.post_mean.squeeze()
+        uncerti = np.sqrt(np.diag(GPobj.post_cov))
 
-    gmean_stef, gcov_stef = algos.get_interp(theta, tfull, meanval, gbar_stef, Klist, Kylist, Dlist, Na)
+        plt.figure('i')
+        plt.fill_between(tfull, meani.real + uncerti.real, meani.real - uncerti.real, facecolor='b', alpha=0.4)
+        plt.plot(tfull, meani.real, 'k')
+        plt.errorbar(t, gbar_stef[i, :].real, Sigmay[i], fmt='xr')
+        plt.show()
+
+    # compute sum of differences
+

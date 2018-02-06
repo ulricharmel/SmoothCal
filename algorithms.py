@@ -126,7 +126,7 @@ def stefcal_update(*args, **kwargs):
         raise StandardError("Error occurred. Original traceback "
                             "is\n%s\n" % traceback_str)
 
-def stefcal_update_impl(g0, A, V, Sigma, Sigmay, i, k):
+def stefcal_update_impl(g0, A, V, W, Sigmay, i, k):
     """
     Here we compute the update for a single antenna.
     Input:
@@ -141,12 +141,12 @@ def stefcal_update_impl(g0, A, V, Sigma, Sigmay, i, k):
         k       - process number to keep everything in the same order
     """
     # compute data source i.e. j
-    j = np.dot(A.T.conj(), V/Sigma)
+    j = np.dot(A.T.conj(), W*V)
     # do update
     gbar = (j/Sigmay + g0)/2.0  # maximum likelihood solution for comparison
     return gbar, k
 
-def get_stefcal_update(g0, A, V, Sigma, Sigmay, i, Na):
+def get_stefcal_update(g0, A, V, W, JHJ, i, Na):
     """
     Here we compute the update for a single antenna. 
     Input:
@@ -163,7 +163,7 @@ def get_stefcal_update(g0, A, V, Sigma, Sigmay, i, Na):
     max_jobs = np.min(np.array([psutil.cpu_count(logical=False), Na]))
     with cf.ProcessPoolExecutor(max_workers=max_jobs) as executor:
         for k in xrange(Na):
-            future = executor.submit(stefcal_update, g0[k], A[k], V[k], Sigma[k], Sigmay[k], i, k)
+            future = executor.submit(stefcal_update, g0[k], A[k], V[k], W[k], JHJ[k], i, k)
             futures.append(future)
         for f in cf.as_completed(futures):
             g, k = f.result()
@@ -393,11 +393,10 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
     A = np.zeros([Na, Nt*Na, Nt], dtype=np.complex128) # to hold per-antenna response
     V = np.zeros([Na, Nt*Na], dtype=np.complex128) # to hold per-antenna data
     W = np.ones([Na, Nt*Na], dtype=np.float64) # to hold weights
-    Sigma = np.zeros([Na, Na*Nt], dtype=np.complex128) # to hold per-antenna weights
-    Sigmay = np.zeros([Na, Nt], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
+    JHJ = np.zeros([Na, Nt], dtype=np.float64) # to hold diagonal of Ad.Sigmainv.A
 
     # initial guess for gains
-    gbar = np.ones([Na, Nt], dtype=np.complex) # initial guess for posterior mean
+    gbar = np.ones([Na, Nt], dtype=np.complex128) # initial guess for posterior mean
 
     # start iterations
     diff = 1.0
@@ -411,14 +410,11 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
                 if i == 0:
                     V[p, j*Na:(j+1)*Na] = Vpq[p, :, j]
                     W[p, j*Na:(j+1)*Na] = Wpq[p, :, j]
-            if i==0:
-                Sigma[p] = 1.0/W[p]
-                Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
-            else:
-                Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0/Sigma[p]).dot(A[p])))
+
+            JHJ[p] = np.diag(np.dot(A[p].T.conj(), np.diag(W[p]).dot(A[p]))).real
 
         # Maximum likelihood solution
-        gbar = get_stefcal_update(gold.copy(), A, V, Sigma, Sigmay, i, Na)
+        gbar = get_stefcal_update(gold.copy(), A, V, W, JHJ, i, Na)
         diff = np.max(np.abs(gbar-gold))
 
         i += 1
@@ -427,7 +423,7 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
     if i >= maxiter:
         print "Maximum iterations reached"
 
-    return gbar, Sigmay
+    return gbar, JHJ
 
 
 def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
