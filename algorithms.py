@@ -446,8 +446,7 @@ def Stefcal_over_time(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1):
     assert Xpq.shape == (Na, Na, Nt)
 
     Nbin = int(np.ceil(float(Nt))/t_int)
-    print "Nbin is ", Nbin
-
+    
     # set operators and data structures for doing per antennae solve
     A = np.zeros([Na, Nt*Na, Nbin], dtype=np.complex128) # to hold per-antenna response
     V = np.zeros([Na, Nt*Na], dtype=np.complex128) # to hold per-antenna data
@@ -461,6 +460,8 @@ def Stefcal_over_time(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1):
     diff = 1.0
     i = 0
     while diff > tol and i < maxiter:
+        A = np.zeros([Na, Nt*Na, Nbin], dtype=np.complex128) # to hold per-antenna response
+        
         gold = gbar.copy()
         for p in xrange(Na):
             for j in xrange(Nt):
