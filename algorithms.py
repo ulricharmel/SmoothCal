@@ -389,6 +389,7 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
     assert Vpq.shape == (Na, Na, Nt)
     assert Xpq.shape == (Na, Na, Nt)
 
+
     # set operators and data structures for doing per antennae solve
     A = np.zeros([Na, Nt*Na, Nt], dtype=np.complex128) # to hold per-antenna response
     V = np.zeros([Na, Nt*Na], dtype=np.complex128) # to hold per-antenna data
@@ -426,6 +427,65 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
     return gbar, JHJ
 
 
+def Stefcal_over_time(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1):
+    """
+    Averages over Nt_interval time samples 
+    :param Na: 
+    :param Nt: 
+    :param Xpq: 
+    :param Vpq: 
+    :param Wpq: 
+    :param Nt_interval: 
+    :return: 
+    """
+
+    print "Running StefCal cycle with solution interval %d"%t_int
+    # check shapes
+    assert t.size == Nt
+    assert Vpq.shape == (Na, Na, Nt)
+    assert Xpq.shape == (Na, Na, Nt)
+
+    Nbin = int(np.ceil(float(Nt))/t_int)
+    print "Nbin is ", Nbin
+
+    # set operators and data structures for doing per antennae solve
+    A = np.zeros([Na, Nt*Na, Nbin], dtype=np.complex128) # to hold per-antenna response
+    V = np.zeros([Na, Nt*Na], dtype=np.complex128) # to hold per-antenna data
+    W = np.ones([Na, Nt*Na], dtype=np.float64) # to hold weights
+    JHJ = np.zeros([Na, Nbin], dtype=np.float64) # to hold diagonal of Ad.Sigmainv.A
+
+    # initial guess for gains
+    gbar = np.ones([Na, Nbin], dtype=np.complex128) # initial guess for posterior mean
+
+    # start iterations
+    diff = 1.0
+    i = 0
+    while diff > tol and i < maxiter:
+        gold = gbar.copy()
+        for p in xrange(Na):
+            for j in xrange(Nt):
+                rr = j/t_int
+                Rpt = Xpq[p, :, j]*(gold[:, rr].conj())
+                A[p, j*Na:(j+1)*Na, rr] += Rpt
+                if i == 0:
+                    V[p, j*Na:(j+1)*Na] = Vpq[p, :, j]
+                    W[p, j*Na:(j+1)*Na] = Wpq[p, :, j]
+
+            JHJ[p] = np.diag(np.dot(A[p].T.conj(), np.diag(W[p]).dot(A[p]))).real
+
+            # Maximum likelihood solution
+        gbar = get_stefcal_update(gold.copy(), A, V, W, JHJ, i, Na)
+        diff = np.max(np.abs(gbar-gold))
+
+        i += 1
+        print "At iteration %i maximum difference is %f"%(i, diff)
+
+    if i >= maxiter:
+        print "Maximum iterations reached"
+
+    return gbar, JHJ
+
+
 def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
     peak_flux = np.abs(ID.max())
     stopping_flux = peak_flux*peak_fact
@@ -448,36 +508,37 @@ def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
     print "Stopping flux = ", peak_flux
     return IM, IR
 
-def Average_over_time(Na, Nt, Xpq, Vpq, Wpq, Nbin, gpred, t):
-    """
-    Averages over Nt_interval time samples 
-    :param Na: 
-    :param Nt: 
-    :param Xpq: 
-    :param Vpq: 
-    :param Wpq: 
-    :param Nt_interval: 
-    :return: 
-    """
-    # get new number of time bins
-    Nt_new = Nt//Nbin
-    # find new bin centers
-    t_new = np.linspace(t[0], t[-1], Nt_new)
-    # set up storage arrays
-    A = np.zeros([Na, Nt_new*Na, Nt_new], dtype=np.complex128) # to hold per-antenna response
-    V = np.zeros([Na, Nt_new*Na], dtype=np.complex128) # to hold per-antenna data
-    W = np.ones([Na, Nt_new*Na], dtype=np.float64) # to hold weights
-    Sigma = np.zeros([Na, Na*Nt_new], dtype=np.complex128) # to hold per-antenna weights
-    Sigmay = np.zeros([Na, Nt_new], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
-    for p in xrange(Na):
-        for j in xrange(Nt_new):
-            # get averaged quantities
-            tmp = Xpq[p, :, j*Nbin:(j+1)*Nbin] * gpred[:, j*Nbin:(j+1)*Nbin].conj()
-            print tmp.shape
-            Rpt = np.mean(tmp, axis=1)
-            A[p, j * Na:(j + 1) * Na, j] = Rpt
-            V[p, j * Na:(j + 1) * Na] = np.mean(Vpq[p, :, j*Nbin:(j+1)*Nbin], axis=1)
-            W[p, j * Na:(j + 1) * Na] = np.mean(Wpq[p, :, j*Nbin:(j+1)*Nbin], axis=1)
-        Sigma[p] = 1.0 / W[p]
-        Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0 / Sigma[p]).dot(A[p])))
-    return A, V, Sigmay, t_new, Nt_new
+
+# def Average_over_time(Na, Nt, Xpq, Vpq, Wpq, Nbin, gpred, t):
+#     """
+#     Averages over Nt_interval time samples 
+#     :param Na: 
+#     :param Nt: 
+#     :param Xpq: 
+#     :param Vpq: 
+#     :param Wpq: 
+#     :param Nt_interval: 
+#     :return: 
+#     """
+#     # get new number of time bins
+#     Nt_new = Nt//Nbin
+#     # find new bin centers
+#     t_new = np.linspace(t[0], t[-1], Nt_new)
+#     # set up storage arrays
+#     A = np.zeros([Na, Nt_new*Na, Nt_new], dtype=np.complex128) # to hold per-antenna response
+#     V = np.zeros([Na, Nt_new*Na], dtype=np.complex128) # to hold per-antenna data
+#     W = np.ones([Na, Nt_new*Na], dtype=np.float64) # to hold weights
+#     Sigma = np.zeros([Na, Na*Nt_new], dtype=np.complex128) # to hold per-antenna weights
+#     Sigmay = np.zeros([Na, Nt_new], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
+#     for p in xrange(Na):
+#         for j in xrange(Nt_new):
+#             # get averaged quantities
+#             tmp = Xpq[p, :, j*Nbin:(j+1)*Nbin] * gpred[:, j*Nbin:(j+1)*Nbin].conj()
+#             print tmp.shape
+#             Rpt = np.mean(tmp, axis=1)
+#             A[p, j * Na:(j + 1) * Na, j] = Rpt
+#             V[p, j * Na:(j + 1) * Na] = np.mean(Vpq[p, :, j*Nbin:(j+1)*Nbin], axis=1)
+#             W[p, j * Na:(j + 1) * Na] = np.mean(Wpq[p, :, j*Nbin:(j+1)*Nbin], axis=1)
+#         Sigma[p] = 1.0 / W[p]
+#         Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0 / Sigma[p]).dot(A[p])))
+#     return A, V, Sigmay, t_new, Nt_new
