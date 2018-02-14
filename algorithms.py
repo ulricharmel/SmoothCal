@@ -446,7 +446,7 @@ def Stefcal_over_time(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1):
     assert Xpq.shape == (Na, Na, Nt)
 
     t_bins = range(0, Nt, t_int)
-    Nbin = len(Nbin)
+    Nbin = len(t_bins)
     
     # set operators and data structures for doing per antennae solve
     A = np.zeros([Na, Nt*Na, Nbin], dtype=np.complex128) # to hold per-antenna response
@@ -525,7 +525,7 @@ def compute_jhr(Na, Nt, jh, r, t_int):
     """compute the jhr similar to CubiCal complex-2x2 gain machine"""
 
     t_bins = range(0, Nt, t_int)
-    Nbin = len(Nbin)
+    Nbin = len(t_bins)
 
     jhr = np.zeros([Na, Nbin], dtype=jh.dtype)
 
@@ -542,7 +542,7 @@ def compute_jhj(Na, Nt, jh, t_int):
     """computes the jhj terms similar to the CubiCal complex-2x2 gain machine"""
 
     t_bins = range(0, Nt, t_int)
-    Nbin = len(Nbin)
+    Nbin = len(t_bins)
 
     jhj = np.zeros([Na, Nbin], dtype=jh.dtype)
 
@@ -590,7 +590,7 @@ def CubiCal_Stefcal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1, com
     assert Xpq.shape == (Na, Na, Nt)
 
     t_bins = range(0, Nt, t_int)
-    Nbin = len(Nbin)
+    Nbin = len(t_bins)
 
     # initial guess for gains
     gbar = np.ones([Na, Nbin], dtype=np.complex128) # initial guess for posterior mean
