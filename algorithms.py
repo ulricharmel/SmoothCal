@@ -393,7 +393,7 @@ def StefCal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25):
     # set operators and data structures for doing per antennae solve
     A = np.zeros([Na, Nt*Na, Nt], dtype=np.complex128) # to hold per-antenna response
     V = np.zeros([Na, Nt*Na], dtype=np.complex128) # to hold per-antenna data
-    W = np.ones([Na, Nt*Na], dtype=np.float64) # to hold weights
+    W = np.ones([Na, Nt*Na], dtype=np.float64)/np.sqrt(2) # to hold weights
     JHJ = np.zeros([Na, Nt], dtype=np.float64) # to hold diagonal of Ad.Sigmainv.A
 
     # initial guess for gains
@@ -445,13 +445,14 @@ def Stefcal_over_time(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1):
     assert Vpq.shape == (Na, Na, Nt)
     assert Xpq.shape == (Na, Na, Nt)
 
-    Nbin = int(np.ceil(float(Nt))/t_int)
+    t_bins = range(0, Nt, t_int)
+    Nbin = len(Nbin)
     
     # set operators and data structures for doing per antennae solve
     A = np.zeros([Na, Nt*Na, Nbin], dtype=np.complex128) # to hold per-antenna response
     V = np.zeros([Na, Nt*Na], dtype=np.complex128) # to hold per-antenna data
-    W = np.ones([Na, Nt*Na], dtype=np.float64) # to hold weights
-    JHJ = np.zeros([Na, Nbin], dtype=np.float64) # to hold diagonal of Ad.Sigmainv.A
+    W = np.ones([Na, Nt*Na], dtype=np.float64)/np.sqrt(2) # to hold weights
+    JHJ = np.zeros([Na, Nbin], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
 
     # initial guess for gains
     gbar = np.ones([Na, Nbin], dtype=np.complex128) # initial guess for posterior mean
@@ -472,7 +473,7 @@ def Stefcal_over_time(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1):
                     V[p, j*Na:(j+1)*Na] = Vpq[p, :, j]
                     W[p, j*Na:(j+1)*Na] = Wpq[p, :, j]
 
-            JHJ[p] = np.diag(np.dot(A[p].T.conj(), np.diag(W[p]).dot(A[p]))).real
+            JHJ[p] = np.diag(np.dot(A[p].T.conj(), np.diag(W[p]).dot(A[p])))
 
             # Maximum likelihood solution
         gbar = get_stefcal_update(gold.copy(), A, V, W, JHJ, i, Na)
@@ -485,6 +486,153 @@ def Stefcal_over_time(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1):
         print "Maximum iterations reached"
 
     return gbar, JHJ
+
+
+def compute_resiudal(Na, Nt, Xpq, Vpq, Wpq, t_int, g):
+    """compute the  resiauls for the simple 1D cases following the CubiCal complex-2x2 gain machine"""
+
+    # check shapes
+    #assert t.size == Nt
+    assert Vpq.shape == (Na, Na, Nt)
+    assert Xpq.shape == (Na, Na, Nt)
+
+
+    res = np.zeros_like(Vpq)
+    res = Vpq
+
+    for aa in xrange(Na):
+        for ab in xrange(Na):
+            for t in xrange(Nt):
+                rr = t/t_int
+                res[aa,ab,t] = res[aa,ab,t] - g[aa,rr]*Xpq[aa,ab,t]*g[ab,rr].conj()
+
+    return res
+
+def compute_jh(Na, Nt, Xpq, Vpq, Wpq, t_int, g):
+    """compute the Jh term similar to CubiCal complex-2x2 gain machine"""
+
+    jh = np.zeros([Na, Na, Nt], dtype=Xpq.dtype)
+
+    for aa in xrange(Na):
+        for ab in xrange(Na):
+            for t in xrange(Nt):
+                rr = t/t_int
+                jh[aa,ab,t] = g[aa,rr]*Xpq[aa,ab,t]
+
+    return jh
+
+def compute_jhr(Na, Nt, jh, r, t_int):
+    """compute the jhr similar to CubiCal complex-2x2 gain machine"""
+
+    t_bins = range(0, Nt, t_int)
+    Nbin = len(Nbin)
+
+    jhr = np.zeros([Na, Nbin], dtype=jh.dtype)
+
+    for aa in xrange(Na):
+        for ab in xrange(Na):
+            for t in xrange(Nt):
+                rr = t/t_int
+                jhr[aa, rr] += r[aa, ab, t]*jh[ab, aa, t]
+
+    return jhr
+
+
+def compute_jhj(Na, Nt, jh, t_int):
+    """computes the jhj terms similar to the CubiCal complex-2x2 gain machine"""
+
+    t_bins = range(0, Nt, t_int)
+    Nbin = len(Nbin)
+
+    jhj = np.zeros([Na, Nbin], dtype=jh.dtype)
+
+    for aa in xrange(Na):
+        for ab in xrange(Na):
+            for t in xrange(Nt):
+                rr = t/t_int
+                jhj[aa, rr] += jh[ab, aa, t].conj()*jh[ab, aa, t]
+
+    return jhj
+
+
+def compute_update(jhj, jhr):
+    """computes the  update term jhjinv*jhr"""
+
+    jhjinv = 1/jhj
+
+    upd = np.zeros_like(jhr)
+
+    Na, Nbin = jhr.shape
+
+    for aa in xrange(Na):
+        for t in xrange(Nbin):
+            upd[aa, t] = jhjinv[aa, t]*jhr[aa, t]
+
+    return upd
+
+
+def CubiCal_Stefcal(Na, Nt, Xpq, Vpq, Wpq, t, tol=5e-3, maxiter=25, t_int=1, compute_res=False):
+    """
+    Averages over Nt_interval time samples 
+    :param Na: 
+    :param Nt: 
+    :param Xpq: 
+    :param Vpq: 
+    :param Wpq: 
+    :param Nt_interval: 
+    :return: 
+    """
+
+    print "Running CubiCal StefCal cycle with solution interval %d"%t_int
+    # check shapes
+    assert t.size == Nt
+    assert Vpq.shape == (Na, Na, Nt)
+    assert Xpq.shape == (Na, Na, Nt)
+
+    t_bins = range(0, Nt, t_int)
+    Nbin = len(Nbin)
+
+    # initial guess for gains
+    gbar = np.ones([Na, Nbin], dtype=np.complex128) # initial guess for posterior mean
+
+    # start iterations
+    diff = 1.0
+    i = 0
+    while diff > tol and i < maxiter:
+        gold = gbar.copy()
+
+        jh = compute_jh(Na, Nt, Xpq, Vpq, Wpq, t_int, gold)
+
+        if compute_res:
+            r = compute_resiudal(Na, Nt, Xpq, Vpq, t_int, gold)
+        else:
+            r = Vpq
+
+        jhr = compute_jhr(Na, Nt, jh, r, t_int)
+
+        jhj = compute_jhj(Na, Nt, jh, t_int)
+
+        update = compute_update(jhj, jhr)
+
+        if compute_res:
+            gbar = gold + update
+        else:
+            gbar = update
+
+        #if i%2 == 0 or compute_res:
+        gbar = 0.5*(gbar + gold)
+
+        diff = np.max(np.abs(gbar-gold))
+
+        i += 1
+        print "At iteration %i maximum difference is %f"%(i, diff)
+
+    if i >= maxiter:
+        print "Maximum iterations reached"
+
+
+    return gbar, jhj
+
 
 
 def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
@@ -510,36 +658,3 @@ def Hogbom(ID, PSF, gamma=0.1, peak_fact=0.1, maxiter=10000):
     return IM, IR
 
 
-# def Average_over_time(Na, Nt, Xpq, Vpq, Wpq, Nbin, gpred, t):
-#     """
-#     Averages over Nt_interval time samples 
-#     :param Na: 
-#     :param Nt: 
-#     :param Xpq: 
-#     :param Vpq: 
-#     :param Wpq: 
-#     :param Nt_interval: 
-#     :return: 
-#     """
-#     # get new number of time bins
-#     Nt_new = Nt//Nbin
-#     # find new bin centers
-#     t_new = np.linspace(t[0], t[-1], Nt_new)
-#     # set up storage arrays
-#     A = np.zeros([Na, Nt_new*Na, Nt_new], dtype=np.complex128) # to hold per-antenna response
-#     V = np.zeros([Na, Nt_new*Na], dtype=np.complex128) # to hold per-antenna data
-#     W = np.ones([Na, Nt_new*Na], dtype=np.float64) # to hold weights
-#     Sigma = np.zeros([Na, Na*Nt_new], dtype=np.complex128) # to hold per-antenna weights
-#     Sigmay = np.zeros([Na, Nt_new], dtype=np.complex128) # to hold diagonal of Ad.Sigmainv.A
-#     for p in xrange(Na):
-#         for j in xrange(Nt_new):
-#             # get averaged quantities
-#             tmp = Xpq[p, :, j*Nbin:(j+1)*Nbin] * gpred[:, j*Nbin:(j+1)*Nbin].conj()
-#             print tmp.shape
-#             Rpt = np.mean(tmp, axis=1)
-#             A[p, j * Na:(j + 1) * Na, j] = Rpt
-#             V[p, j * Na:(j + 1) * Na] = np.mean(Vpq[p, :, j*Nbin:(j+1)*Nbin], axis=1)
-#             W[p, j * Na:(j + 1) * Na] = np.mean(Wpq[p, :, j*Nbin:(j+1)*Nbin], axis=1)
-#         Sigma[p] = 1.0 / W[p]
-#         Sigmay[p] = np.diag(np.dot(A[p].T.conj(), np.diag(1.0 / Sigma[p]).dot(A[p])))
-#     return A, V, Sigmay, t_new, Nt_new
